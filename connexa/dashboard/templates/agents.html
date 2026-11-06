@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Agent Handler</h1>
+<p class="muted">Agent orgs self-register at <code>POST /api/v1/agent/signup/</code> and land here unclaimed until a human claims them. Requests for broader tool access appear in the review queue below.</p>
+
+<h2>Agent organizations</h2>
+<table>
+  <tr><th>Org</th><th>Slug</th><th>Claimed</th><th>Connected users</th><th>Tool packs</th></tr>
+  {% for a in agent_orgs %}
+  <tr>
+    <td>{{ a.name }}</td><td><code>{{ a.slug }}</code></td>
+    <td>{% if a.claimed %}<span class="pill ok">claimed</span>{% else %}<span class="pill mid">awaiting claim</span>{% endif %}</td>
+    <td>{{ users.get(a.id, 0) }}</td>
+    <td>{% for p in packs.get(a.id, []) %}<span class="pill mid">{{ p.name }}</span> <span class="muted">{{ p.connectors|join(" · ") }}</span><br>{% endfor %}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">No agent orgs yet. Run the signup curl from the README.</td></tr>{% endfor %}
+</table>
+
+<h2>Tool-access review queue</h2>
+<table>
+  <tr><th>Tool</th><th>Reason</th><th>Status</th><th></th></tr>
+  {% for r in requests %}
+  <tr>
+    <td><code>{{ r.tool_name }}</code></td>
+    <td class="muted">{{ r.reason or "—" }}</td>
+    <td><span class="pill {{ 'ok' if r.status=='approved' else ('no' if r.status=='rejected' else 'mid') }}">{{ r.status }}</span></td>
+    <td>{% if r.status == "pending" %}<form class="inline" method="post" action="/dashboard/agents/requests/resolve">
+        <input type="hidden" name="request_id_row" value="{{ r.id }}">
+        <button class="small" name="decision" value="approve">Approve</button>
+        <button class="secondary small" name="decision" value="reject">Reject</button></form>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="4" class="muted">No requests yet.</td></tr>{% endfor %}
+</table>
+
+<h2>Audit stream (all planes)</h2>
+<table>
+  <tr><th>When</th><th>Event</th><th>Description</th><th>Actor</th></tr>
+  {% for e in audit_rows %}
+  <tr><td class="muted">{{ iso(e.ts) }}</td><td><code>{{ e.event_type }}</code></td>
+      <td>{{ e.description or "" }}</td><td class="muted">{{ e.actor }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">Nothing audited yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

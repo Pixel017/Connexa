@@ -1,0 +1,16 @@
+services:
+  connexa:
+    build: .
+    container_name: connexa
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env                      # optional: provider tokens + OAuth client ids
+    environment:
+      - CONNEXA_DB=/data/connexa.db
+    volumes:
+      - connexa-data:/data        # SQLite survives rebuilds
+    restart: unless-stopped
+
+volumes:
+  connexa-data:

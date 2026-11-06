@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Link flow &amp; linked accounts</h1>
+
+{% if created_link %}
+<div class="flash">
+  <strong>Link token created:</strong>
+  <code class="big">http://127.0.0.1:8000/link/{{ created_link }}</code>
+  <div class="note">Open that URL as the end user, pick an integration, and complete the connect screen.</div>
+</div>
+{% endif %}
+
+<h2>Create a link token</h2>
+<form method="post" action="/dashboard/link/create-token">
+  <select name="categories">
+    <option value="ticketing,crm">ticketing + crm</option>
+    <option value="ticketing">ticketing only</option>
+    <option value="crm">crm only</option>
+  </select>
+  <button>Create + show link</button>
+</form>
+
+<h2>Linked accounts</h2>
+<table>
+  <tr><th>Category</th><th>Integration</th><th>End user</th><th>Status</th><th>Linked at</th></tr>
+  {% for a in accounts %}
+  <tr>
+    <td>{{ a.category }}</td><td><code>{{ a.integration }}</code></td>
+    <td>{{ a.end_user_name or "—" }}</td>
+    <td><span class="pill ok">{{ a.status }}</span></td>
+    <td class="muted">{{ iso(a.linked_at) }}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">None yet — create a link token above.</td></tr>{% endfor %}
+</table>
+
+<h2>Recent link tokens</h2>
+<table>
+  <tr><th>Token</th><th>Categories</th><th>Status</th></tr>
+  {% for t in tokens %}
+  <tr><td><code>{{ t.token }}</code></td><td>{{ t.categories|join(", ") }}</td>
+      <td><span class="pill {{ 'ok' if t.status=='ready' else 'no' }}">{{ t.status }}</span></td></tr>
+  {% else %}<tr><td colspan="3" class="muted">None.</td></tr>{% endfor %}
+</table>
+{% endblock %}

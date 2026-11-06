@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Connect your apps — Connexa</title>
+  <style>
+    body{font-family:'Segoe UI',system-ui,sans-serif;background:#f2f5f9;color:#15202b;margin:0;}
+    .wrap{max-width:640px;margin:48px auto;background:#fff;border-radius:16px;box-shadow:0 2px 10px rgba(0,0,0,.08);padding:28px 32px;}
+    h1{font-size:21px;margin:0 0 4px;} .muted{color:#5a6b7f;font-size:13.5px;}
+    .opt{border:1px solid #dde5ee;border-radius:12px;padding:14px 18px;margin:12px 0;display:flex;align-items:center;gap:14px;cursor:pointer;}
+    .opt:hover{border-color:#3b5bdb;background:#f6f9ff;}
+    .logo{width:42px;height:42px;border-radius:10px;background:#15202b;color:#9ad1ff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;}
+    .opt input{display:none;}
+    form{margin:22px 0 0;} input[type=text]{padding:10px 12px;border:1px solid #ccd6e0;border-radius:8px;width:100%;font-size:14px;}
+    button{background:#3b5bdb;color:#fff;border:0;border-radius:9px;padding:11px 20px;font-size:15px;cursor:pointer;margin-top:14px;}
+    .badge{font-size:11px;padding:2px 8px;border-radius:999px;background:#d3f9d8;color:#2b8a3e;vertical-align:middle;}
+    .badge.demo{background:#fff3bf;color:#a38000;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Connect your apps</h1>
+    <p class="muted">Completing this screen lets <strong>{{ org_name }}</strong> sync data with the tools you choose. Pick an integration below.</p>
+    <form method="post" action="/link/{{ token }}/connect">
+      {% for category, entries in options.items() %}
+      <h2 class="muted" style="text-transform:uppercase;letter-spacing:.5px;font-size:12.5px;margin-top:20px;">{{ category }}</h2>
+      {% for option in entries %}
+      <label class="opt">
+        <input type="radio" name="integration" value="{{ option.slug }}"
+               required={% if option.slug == selected_integration %}"true" checked="checked"{% endif %}>
+        <div class="logo">{{ option.slug[:2]|upper }}</div>
+        <div>
+          <div><strong>{{ option.name }}</strong>
+            {% if option.real %}<span class="badge">LIVE</span>{% else %}<span class="badge demo">demo</span>{% endif %}</div>
+          <div class="muted">{{ option.description }}</div>
+        </div>
+      </label>
+      {% endfor %}
+      {% endfor %}
+      <input type="text" name="end_user_name" placeholder="Your name (for the access log)" value="End User">
+      <button>Connect</button>
+    </form>
+  </div>
+</body>
+</html>

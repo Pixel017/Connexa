@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>{{ org.name }} <span class="pill {{ 'ok' if org.plan else 'mid' }}">{{ org.plan }} plan</span></h1>
+<p class="muted">The whole platform in one process: data plane · link flow · agent tool server · model router.</p>
+
+<div class="cards">
+  <div class="card"><div class="num">{{ linked }}</div><div class="lbl">Linked accounts</div></div>
+  <div class="card"><div class="num">{{ tickets }}</div><div class="lbl">Tickets synced</div></div>
+  <div class="card"><div class="num">{{ contacts }}</div><div class="lbl">CRM contacts</div></div>
+  <div class="card"><div class="num">{{ deals }}</div><div class="lbl">Deals</div></div>
+  <div class="card"><div class="num">{{ agents }}</div><div class="lbl">Agent orgs</div></div>
+</div>
+
+<h2>Recent platform activity (usage meter)</h2>
+<table>
+  <tr><th>When</th><th>Plane</th><th>Kind</th><th>Credits</th></tr>
+  {% for row in usage_rows %}
+  <tr><td>{{ iso(row.ts) }}</td><td>{{ row.plane }}</td><td>{{ row.kind }}</td>
+      <td>{% if row.credits %}−{{ row.credits }}{% else %}—{% endif %}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">No usage yet — create an API key and start calling.</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Quick start</h2>
+<ol class="muted" style="line-height:1.9;">
+  <li><strong>Link</strong>: <a href="/dashboard/link">create a link token</a> → open the link URL → connect a sample provider → exchange the public token → call the data plane.</li>
+  <li><strong>Agent</strong>: <code>curl -X POST http://127.0.0.1:8000/api/v1/agent/signup/</code> → use the returned key on the MCP endpoint (see README).</li>
+  <li><strong>Gateway</strong>: create a <code>gateway</code> key on the <a href="/dashboard/keys">keys page</a> → POST /v1/chat/completions.</li>
+</ol>
+{% endblock %}

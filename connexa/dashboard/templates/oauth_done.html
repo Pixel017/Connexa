@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>body{font-family:'Segoe UI',system-ui,sans-serif;background:#f2f5f9;display:flex;align-items:center;justify-content:center;height:100vh;}
+.box{background:#fff;border-radius:16px;box-shadow:0 2px 10px rgba(0,0,0,.08);padding:34px 42px;text-align:center;max-width:560px;}
+.ok{color:#0a7d33;font-size:44px;margin:0;} .fail{color:#b30f0f;font-size:44px;margin:0;}
+code{font-family:Consolas,monospace;background:#0f1720;color:#9ad1ff;padding:10px 16px;border-radius:8px;display:block;word-break:break-all;font-size:13px;margin:14px 0;}
+.muted{color:#5b6b7c;font-size:13px;}</style></head>
+<body><div class="box">
+{% if ok %}
+  <div class="ok">✓</div>
+  <h1>{{ connector_name }} connected</h1>
+  <p><strong>Successfully.</strong> The access token is stored on the registered user<br>— the agent's next tool call runs on the live provider.</p>
+{% else %}
+  <div class="fail">✕</div>
+  <h1>{{ connector_name }} not connected</h1>
+  <p><strong>{{ reason }}</strong></p>
+  {% if detail %}<p class="muted">{{ detail }}</p>{% endif %}
+  <p class="muted">Ask the agent to call its authenticate tool again for a fresh authorization URL.</p>
+{% endif %}
+<p class="muted">You can close this window.</p>
+</div></body></html>

@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>API keys</h1>
+{% if created_key %}
+<div class="flash">
+  <strong>Copy it now — shown once:</strong>
+  <code class="big">{{ created_key }}</code>
+  <div class="note">Only its hash is checked at request time; the raw value is never shown again.</div>
+</div>
+{% endif %}
+
+<h2>Create</h2>
+<form method="post" action="/dashboard/keys/create">
+  <input type="text" name="name" placeholder="key name">
+  <select name="scope">
+    <option value="data">data — Unified API plane</option>
+    <option value="gateway">gateway — model router plane</option>
+    <option value="admin">admin — everything incl. dashboard API</option>
+  </select>
+  <button>Create</button>
+</form>
+
+<h2>Active keys ({{ org.name }})</h2>
+<table>
+  <tr><th>Name</th><th>Scope</th><th>Key</th><th>Created</th><th></th></tr>
+  {% for key in keys %}
+  <tr>
+    <td>{{ key.name }}</td>
+    <td><span class="pill {{ 'ok' if key.scope=='data' else 'mid' }}">{{ key.scope }}</span></td>
+    <td><code>{{ key.key_masked }}</code></td>
+    <td class="muted">{{ iso(key.created_at) }}</td>
+    <td><form class="inline" method="post" action="/dashboard/keys/revoke">
+        <input type="hidden" name="key_id" value="{{ key.id }}">
+        <button class="secondary small">Revoke</button></form></td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">No keys yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}

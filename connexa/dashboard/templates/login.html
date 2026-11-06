@@ -1,0 +1,7 @@
+<h1>Connexa Console — sign in</h1>
+<p class="muted">Enter the admin token (default <code>dev-admin</code>, set CONNEXA_ADMIN_TOKEN in .env).</p>
+{% if error %}<div class="flash" style="background:#ffe3e3;border-color:#ffc2c2;">{{ error }}</div>{% endif %}
+<form method="post" action="/login">
+  <input type="text" name="token" placeholder="admin token" autofocus>
+  <button>Sign in</button>
+</form>

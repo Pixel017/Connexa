@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Webhooks</h1>
+<p class="muted">Deliveries are signed: <code>X-Connexa-Signature: sha256=hex(HMAC-SHA256(secret, raw_body))</code> — always verify over the raw body.</p>
+
+<h2>Add endpoint</h2>
+<form method="post" action="/dashboard/webhooks/create">
+  <input type="url" name="url" placeholder="https://your-server.example/hooks" style="min-width:340px;">
+  <input type="text" name="events" placeholder="* or LinkedAccount.linked,Ticket.synced" style="min-width:300px;">
+  <button>Add</button>
+</form>
+
+<h2>Endpoints</h2>
+<table>
+  <tr><th>URL</th><th>Events</th><th>Active</th></tr>
+  {% for e in endpoints %}
+  <tr><td><code>{{ e.url }}</code></td><td>{{ e.events|join(", ") }}</td>
+      <td><span class="pill {{ 'ok' if e.active else 'no' }}">{{ "active" if e.active else "off" }}</span></td></tr>
+  {% else %}<tr><td colspan="3" class="muted">No endpoints yet.</td></tr>{% endfor %}
+</table>
+
+<h2>Recent deliveries</h2>
+<table>
+  <tr><th>When</th><th>Event</th><th>Result</th></tr>
+  {% for d in deliveries %}
+  <tr><td class="muted">{{ iso(d.created_at) }}</td><td><code>{{ d.event }}</code></td>
+      <td>{% if d.ok %}<span class="pill ok">HTTP {{ d.status_code }}</span>
+          {% else %}<span class="pill no">{{ ("HTTP " ~ d.status_code) if d.status_code else "pending/failed" }}</span>{% endif %}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">No deliveries yet. Add an endpoint, manage linked accounts, and events will flow (or create an agent org).</td></tr>{% endfor %}
+</table>
+{% endblock %}

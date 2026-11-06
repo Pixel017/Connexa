@@ -1,0 +1,13 @@
+# Never commit secrets or live data
+.env
+connexa.db
+*.db
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Local junk
+.DS_Store
+Thumbs.db

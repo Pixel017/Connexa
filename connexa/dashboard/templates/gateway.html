@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>Gateway</h1>
+<p class="muted">Model router: OpenAI-compatible <code>POST /v1/chat/completions</code>. Routing policies pick vendor chains; <span class="pill mid">connexa-echo</span> is the always-available fallback. Set OPENAI_API_KEY / ANTHROPIC_API_KEY in .env to light up live vendors.</p>
+
+<h2>Model catalog</h2>
+<table>
+  <tr><th>Model</th><th>Vendor</th><th>Status</th><th>Credits / 1k tokens (in / out)</th></tr>
+  {% for m in models %}
+  <tr><td><code>{{ m.slug }}</code></td><td>{{ m.vendor }}</td>
+      <td><span class="pill {{ 'ok' if m.status=='available' else 'mid' }}">{{ m.status }}</span></td>
+      <td>{{ m.input_cpt }} / {{ m.output_cpt }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>Routing policies</h2>
+{% for p in policies %}
+<div class="flash" style="padding:8px 14px;">
+  <strong>{{ p.name }}</strong> <span class="pill mid">{{ p.strategy }}</span>
+  {% if p.is_default %}<span class="pill ok">default</span>{% else %}
+  <form class="inline" method="post" action="/dashboard/gateway/policy-default">
+    <input type="hidden" name="policy_id" value="{{ p.id }}">
+    <button class="small">Make default</button></form>{% endif %}
+  <div class="muted">{{ p.model_order|join(" → ") }}</div>
+</div>
+{% else %}<p class="muted">The seed created a default policy.</p>{% endfor %}
+
+<h2>Monthly budget</h2>
+{% if budget %}
+<form method="post" action="/dashboard/gateway/budget">
+  <input type="text" name="credits_total" value="{{ budget.credits_total }}" style="width:140px;">
+  <button>Save monthly cap</button>
+  <span class="muted">Current cap: {{ budget.credits_total }} credits</span>
+</form>
+{% endif %}
+
+<h2>Recent gateway usage</h2>
+<table>
+  <tr><th>When</th><th>Kind</th><th>Credits</th></tr>
+  {% for u in usage_rows %}
+  <tr><td class="muted">{{ iso(u.ts) }}</td><td>{{ u.kind }}</td><td>−{{ u.credits }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">No gateway calls yet.</td></tr>{% endfor %}
+</table>
+{% endblock %}
