@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Audit Trail — Connexa Console{% endblock %}
+{% block body %}
+<h1>Audit Trail</h1>
+<p class="muted">Full transparency for every action across the platform — the newest {{ rows|length }} of {{ total }} recorded events.</p>
+
+{% if rows %}
+<table>
+  <tr><th>When</th><th>Actor</th><th>Event</th><th>Description</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ iso(r.ts) }}</td>
+    <td>{{ r.actor }}</td>
+    <td><span class="pill mid">{{ r.event_type }}</span></td>
+    <td>{{ r.description or "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">No audit entries yet — they appear as keys, links, syncs and tool decisions happen.</p>
+{% endif %}
+{% endblock %}

@@ -111,6 +111,27 @@ def list_linked_accounts(auth=Depends(data_plane_key), db: Session = Depends(get
          "account_token_masked": r.account_token[:9] + "…",
          "linked_at": iso(r.linked_at)} for r in rows]}
 
+# ------------------------------------------------------------ on-demand sync
+
+@router.post("/{category}/v1/accounts/{public_token}/sync")
+def sync_account(category: str, public_token: str, background: BackgroundTasks,
+                 auth=Depends(data_plane_key), db: Session = Depends(get_db)):
+    key, org = auth
+    if category not in ("ticketing", "crm"):
+        raise HTTPException(404, {"detail": f"Unknown category '{category}'."})
+    account = (db.query(LinkedAccount)
+               .filter(LinkedAccount.account_token == public_token, LinkedAccount.org_id == org.id)
+               .first())
+    if not account:
+        raise HTTPException(404, {"detail": "Unknown public token."})
+    if account.category != category:
+        raise HTTPException(400, {"detail": f"This public token belongs to category '{account.category}'."})
+    from .sync import run_sync
+    summary = run_sync(db, account, background=background, actor="api")
+    usage(db, plane="data", kind="sync_request", org_id=org.id, key_id=key.id, units=1.0, credits=0)
+    return summary
+
+
 # ------------------------------------------------------------ ticketing
 
 class TicketCreate(BaseModel):

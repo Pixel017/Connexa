@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -9,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..connectors.registry import registry
 from ..db import get_db
 from ..models import (ApiKey, AuditEntry, Budget, GatewayModel, LinkToken, LinkedAccount,
                       Org, RegisteredUser, RoutingPolicy, SecurityRule, Ticket, Contact, Deal,
@@ -63,6 +65,11 @@ def logout():
 
 
 @router.get("/", response_class=HTMLResponse)
+def root_redirect():
+    # `/` belongs to the public marketing site; consoles live under /dashboard.
+    return RedirectResponse("/dashboard", status_code=303)
+
+
 @router.get("/dashboard", response_class=HTMLResponse)
 def overview(request: Request, db: Session = Depends(get_db)):
     if not admin_cookie_ok(request):
@@ -142,6 +149,51 @@ async def create_link_token(request: Request, categories: str = Form("ticketing,
     db.commit()
     audit(db, event_type="LINK_TOKEN_CREATED", description=token.token, org_id=org.id, actor="dashboard")
     return RedirectResponse(f"/dashboard/link?created={token.token}", status_code=303)
+
+
+# ---------------------------------------------------------------- linked accounts + sync
+
+@router.get("/dashboard/accounts", response_class=HTMLResponse)
+def accounts_page(request: Request, db: Session = Depends(get_db), flash: str = ""):
+    if not admin_cookie_ok(request):
+        return RedirectResponse("/login", status_code=303)
+    org = require_admin(request, db)
+    accounts = (db.query(LinkedAccount).filter(LinkedAccount.org_id == org.id)
+                .order_by(LinkedAccount.linked_at.desc()).all())
+    for account in accounts:
+        account.tickets_n = db.query(Ticket).filter(Ticket.linked_account_id == account.id).count()
+        account.contacts_n = db.query(Contact).filter(Contact.linked_account_id == account.id).count()
+        account.deals_n = db.query(Deal).filter(Deal.linked_account_id == account.id).count()
+        connector = registry.get(account.integration)
+        account.connector_name = connector.name if connector else account.integration
+    return page(request, "accounts.html", {"org": org, "accounts": accounts, "iso": iso, "flash": flash})
+
+
+@router.post("/dashboard/accounts/sync")
+async def accounts_sync(request: Request, account_id: str = Form(...), db: Session = Depends(get_db)):
+    org = require_admin(request, db)
+    account = (db.query(LinkedAccount)
+               .filter(LinkedAccount.id == account_id, LinkedAccount.org_id == org.id).first())
+    if account:
+        from ..sync import run_sync
+        summary = run_sync(db, account, actor="dashboard")
+        flash = (f"Synced {account.integration}: +{summary['added']} added, "
+                 f"~{summary['updated']} updated, ={summary['unchanged']} unchanged")
+    else:
+        flash = "Unknown linked account."
+    return RedirectResponse(f"/dashboard/accounts?flash={quote(flash)}", status_code=303)
+
+
+# ---------------------------------------------------------------- audit trail
+
+@router.get("/dashboard/audit", response_class=HTMLResponse)
+def audit_page(request: Request, db: Session = Depends(get_db)):
+    if not admin_cookie_ok(request):
+        return RedirectResponse("/login", status_code=303)
+    org = require_admin(request, db)
+    rows = db.query(AuditEntry).order_by(AuditEntry.ts.desc()).limit(100).all()
+    total = db.query(AuditEntry).count()
+    return page(request, "audit.html", {"org": org, "rows": rows, "total": total, "iso": iso})
 
 # ---------------------------------------------------------------- webhooks
 

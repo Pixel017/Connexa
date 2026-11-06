@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Connexa — the business context engine for AI agents{% endblock %}</title>
+  <meta name="description" content="Connexa is one Python process that gives your product and your agents real accounts: a unified Common Model data plane, an MCP agent handler, and an LLM gateway — self-hostable, MIT licensed.">
+  <style>
+    :root {
+      --ink:#151a21; --body:#3d4652; --muted:#6b7683; --line:#e7e4dc;
+      --bg:#faf9f5; --card:#ffffff; --accent:#4263eb; --accent-ink:#3b5bdb;
+      --ok:#0ca678; --code-bg:#11151b; --code-ink:#a5d8ff;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; font-family:'Segoe UI',system-ui,-apple-system,sans-serif; color:var(--body); background:var(--bg); line-height:1.6; }
+    h1,h2,h3 { color:var(--ink); line-height:1.15; letter-spacing:-.015em; }
+    a { color:var(--accent-ink); }
+    code, pre { font-family:Consolas,Menlo,monospace; }
+
+    /* nav */
+    .nav { position:sticky; top:0; z-index:50; background:rgba(250,249,245,.86); backdrop-filter:blur(10px);
+           border-bottom:1px solid var(--line); display:flex; align-items:center; gap:26px; padding:14px 5vw; }
+    .nav .wordmark { display:flex; align-items:center; gap:9px; font-weight:800; font-size:19px; color:var(--ink); text-decoration:none; letter-spacing:-.02em; }
+    .nav .wordmark .glyph { width:24px; height:24px; }
+    .nav nav { display:flex; gap:20px; flex-wrap:wrap; }
+    .nav nav a { color:var(--body); text-decoration:none; font-size:14.5px; }
+    .nav nav a:hover { color:var(--ink); }
+    .nav .push { flex:1; }
+    .nav .gh { color:var(--muted); text-decoration:none; font-size:14px; }
+    .btn { display:inline-block; border-radius:999px; padding:10px 22px; font-size:14.5px; font-weight:600;
+           text-decoration:none; cursor:pointer; border:1px solid transparent; }
+    .btn.dark { background:var(--ink); color:#fff; }
+    .btn.dark:hover { background:#000; }
+    .btn.ghost { background:transparent; color:var(--ink); border-color:#c9c4b8; }
+    .btn.ghost:hover { border-color:var(--ink); }
+    .btn.small { padding:6px 14px; font-size:13px; }
+
+    /* hero + sections */
+    .hero { padding:84px 5vw 60px; max-width:1080px; margin:0 auto;
+            background-image:radial-gradient(circle at 1px 1px, rgba(21,26,33,.10) 1px, transparent 0);
+            background-size:26px 26px; }
+    .hero h1 { font-size:52px; margin:18px 0 20px; max-width:760px; }
+    .hero p.sub { font-size:19px; max-width:640px; color:var(--body); margin:0 0 30px; }
+    .eyebrow { font-family:Consolas,monospace; font-size:12.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--accent-ink); }
+    section { max-width:1080px; margin:0 auto; padding:44px 5vw; }
+    section.tight { padding-top:10px; }
+    h2.sec { font-size:30px; margin:8px 0 10px; }
+    p.sec-sub { max-width:620px; margin:0 0 28px; }
+
+    .split { display:grid; grid-template-columns:repeat(auto-fit, minmax(280px,1fr)); gap:20px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:26px 26px 22px;
+            box-shadow:0 1px 2px rgba(20,25,33,.04); }
+    .card h3 { margin:0 0 8px; font-size:19px; }
+    .card p { margin:0; font-size:14.5px; }
+    .card .tag { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); font-weight:700; }
+    .card .go { display:inline-block; margin-top:16px; font-size:14px; text-decoration:none; font-weight:600; }
+    .tinted { background:linear-gradient(180deg,#fdfcf9, #f2f1ea); border-radius:22px; border:1px solid var(--line); padding:6px; }
+    .tinted .inner { border-radius:18px; padding:30px; }
+
+    .chiprow { display:flex; flex-wrap:wrap; gap:10px; margin-top:26px; }
+    .chip { background:#fff; border:1px solid var(--line); border-radius:999px; padding:6px 14px; font-size:13px; color:var(--body); }
+    .chip b { color:var(--ink); font-weight:600; }
+    .chip .live { color:var(--ok); font-weight:700; }
+
+    .step { display:grid; grid-template-columns:64px 1fr 480px; gap:26px; align-items:start;
+            border-top:1px solid var(--line); padding:30px 0; }
+    .step .num { font-size:13px; color:var(--accent-ink); font-weight:700; letter-spacing:.08em; }
+    .step h3 { margin:2px 0 8px; font-size:21px; }
+    .step p { margin:0; font-size:14.5px; }
+    pre.code { background:var(--code-bg); color:var(--code-ink); border-radius:12px; padding:18px 20px;
+               font-size:12.5px; line-height:1.65; overflow-x:auto; white-space:pre-wrap; word-break:break-word; }
+    pre.code .label { color:#f4b8a0; font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:10px; }
+
+    table.cmp { width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--line); border-radius:14px; overflow:hidden; font-size:14px; }
+    table.cmp th { background:#f1efe8; text-align:center; padding:14px 12px; font-size:15px; color:var(--ink); }
+    table.cmp th:first-child { text-align:left; }
+    table.cmp td { padding:11px 12px; border-top:1px solid #f0ede5; text-align:center; }
+    table.cmp td:first-child { text-align:left; color:var(--ink); font-weight:500; }
+    table.cmp td .y { color:var(--ok); font-weight:700; }
+    table.cmp td .n { color:#c0b9a8; }
+    table.cmp tr.group td { background:#faf8f2; font-weight:700; color:var(--ink); text-align:left; font-size:13px; letter-spacing:.04em; text-transform:uppercase; }
+
+    .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:20px; }
+    .metric { background:#fff; border:1px solid var(--line); border-radius:14px; padding:20px 22px; }
+    .metric .n { font-size:28px; font-weight:800; color:var(--ink); }
+    .metric .l { font-size:13px; color:var(--muted); }
+
+    footer { border-top:1px solid var(--line); background:#f4f2ec; margin-top:60px; padding:46px 5vw 30px; }
+    footer .cols { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:26px; max-width:1080px; margin:0 auto; }
+    footer h4 { color:var(--ink); font-size:13.5px; margin:0 0 10px; }
+    footer a { display:block; color:var(--muted); text-decoration:none; font-size:13.5px; padding:3px 0; }
+    footer a:hover { color:var(--ink); }
+    footer .base { max-width:1080px; margin:30px auto 0; display:flex; gap:16px; align-items:center; color:var(--muted); font-size:13px; flex-wrap:wrap; }
+    footer .base .push { flex:1; }
+
+    .cta-band { background:var(--ink); border-radius:20px; color:#d6dbe2; padding:44px 42px; }
+    .cta-band h2 { color:#fff; font-size:28px; margin:0 0 10px; }
+    .cta-band p { margin:0 0 22px; max-width:560px; }
+    .cta-band a.btn.light { background:#fff; color:var(--ink); }
+
+    .pill-ok { display:inline-block; background:#e6fcf5; color:var(--ok); border-radius:999px; padding:2px 10px; font-size:12px; font-weight:700; }
+    .pill-dev { display:inline-block; background:#fff4e6; color:#c05e00; border-radius:999px; padding:2px 10px; font-size:12px; font-weight:700; }
+    @media (max-width:900px) { .step { grid-template-columns:1fr; } .hero h1 { font-size:38px; } }
+  </style>
+</head>
+<body>
+<div class="nav">
+  <a class="wordmark" href="/">
+    <svg class="glyph" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path d="M6 24 C9 16, 16 8, 27 6" stroke="#151a21" stroke-width="4.4" stroke-linecap="round"/>
+      <path d="M6 6 C10 12, 15 18, 26 24" stroke="#4263eb" stroke-width="4.4" stroke-linecap="round"/>
+    </svg>
+    connexa
+  </a>
+  <nav>
+    <a href="/unified">Unified</a>
+    <a href="/agent-handler">Agent Handler</a>
+    <a href="/gateway">Gateway</a>
+    <a href="/workforce">Workforce</a>
+    <a href="/integrations">Integrations</a>
+    <a href="/pricing">Pricing</a>
+    <a href="/security">Security</a>
+  </nav>
+  <div class="push"></div>
+  <a class="gh" href="https://github.com/Pixel017/Connexa" target="_blank" rel="noopener">GitHub ↗</a>
+  <a class="btn dark small" href="/dashboard">Open console</a>
+</div>
+
+{% block body %}{% endblock %}
+
+<footer>
+  <div class="cols">
+    <div>
+      <h4>Products</h4>
+      <a href="/unified">Connexa Unified</a>
+      <a href="/agent-handler">Agent Handler</a>
+      <a href="/gateway">Gateway</a>
+      <a href="/workforce">For Workforce</a>
+    </div>
+    <div>
+      <h4>Integrations</h4>
+      <a href="/integrations">Browse all</a>
+      <a href="/integrations">Ticketing</a>
+      <a href="/integrations">CRM</a>
+      <a href="https://github.com/Pixel017/Connexa/blob/main/docs/connector-sdk.md" target="_blank" rel="noopener">Connector SDK</a>
+    </div>
+    <div>
+      <h4>Developers</h4>
+      <a href="/docs">API reference</a>
+      <a href="/llms.txt">llms.txt</a>
+      <a href="/llms-full.txt">llms-full.txt</a>
+      <a href="/dashboard">Console</a>
+    </div>
+    <div>
+      <h4>Company</h4>
+      <a href="/pricing">Pricing</a>
+      <a href="/security">Security</a>
+      <a href="https://github.com/Pixel017/Connexa" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Pixel017/Connexa/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>
+    </div>
+  </div>
+  <div class="base">
+    <div>© 2026 Connexa — original open-source code, MIT licensed. Not affiliated with any commercial platform.</div>
+    <div class="push"></div>
+    <div><span class="pill-ok">self-hostable</span></div>
+  </div>
+</footer>
+</body>
+</html>

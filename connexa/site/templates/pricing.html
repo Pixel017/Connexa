@@ -1,0 +1,78 @@
+{% extends "site_base.html" %}
+{% block title %}Pricing — Connexa{% endblock %}
+{% block body %}
+<section style="padding-top:64px;">
+  <span class="eyebrow">Pricing</span>
+  <h1 style="font-size:40px; margin:12px 0 10px;">Start free. Pay when it powers customers.</h1>
+  <p class="sec-sub">Self-hosted always. The cloud pricing below funds development — the license stays MIT.</p>
+</section>
+
+<section class="tight">
+  <div class="split">
+    <div class="card">
+      <div class="tag">Free forever</div>
+      <h3 style="margin-top:8px;">Sandbox</h3>
+      <p>Build and prove your integration before spending anything.</p>
+      <a class="btn ghost small" href="/dashboard" style="margin-top:16px;">Start now</a>
+      <p style="margin-top:16px; font-size:13.5px;">
+        ✓ First <b>3 production Linked Accounts</b> free<br>
+        ✓ Every connector, every Common Model<br>
+        ✓ Full data plane + Agent Handler + Gateway<br>
+        ✓ Community support on GitHub
+      </p>
+    </div>
+    <div class="card" style="border-color:var(--accent-ink); box-shadow:0 3px 14px rgba(66,99,235,.12);">
+      <div class="tag" style="color:var(--accent-ink);">Most companies</div>
+      <h3 style="margin-top:8px;">Growth</h3>
+      <p>For products serving real customers at scale.</p>
+      <a class="btn dark small" href="/dashboard" style="margin-top:16px;">Talk to us</a>
+      <p style="margin-top:16px; font-size:13.5px;">
+        ✓ Up to <b>10 Linked Accounts</b> ($49 each beyond)<br>
+        ✓ Custom sync frequencies on request<br>
+        ✓ 30-day log retention<br>
+        ✓ Go-live support package
+      </p>
+    </div>
+    <div class="card">
+      <div class="tag">High touch</div>
+      <h3 style="margin-top:8px;">Enterprise</h3>
+      <p>Contract-based, with the controls big companies require.</p>
+      <a class="btn ghost small" href="/dashboard" style="margin-top:16px;">Talk to us</a>
+      <p style="margin-top:16px; font-size:13.5px;">
+        ✓ Audit-trail export &amp; log retention 90+ days<br>
+        ✓ Dedicated support channel &amp; SLAs<br>
+        ✓ Priority connector roadmap<br>
+        ✓ Self-hosting assistance
+      </p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">What's in every plan</h2>
+  <table class="cmp">
+    <tr><th style="width:38%;">Capability</th><th>Sandbox</th><th>Growth</th><th>Enterprise</th></tr>
+    <tr class="group"><td colspan="4">Unified (data plane)</td></tr>
+    <tr><td>Production Linked Accounts</td><td>first 3 free</td><td>up to 10</td><td>volume</td></tr>
+    <tr><td>Data usage</td><td>unlimited</td><td>unlimited</td><td>unlimited</td></tr>
+    <tr><td>Common Models + remote_data</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr><td>Embedded Connexa Link flow</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr><td>Sync API + LinkedAccount.synced webhooks</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr><td>Passthrough to provider APIs</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr class="group"><td colspan="4">Agent Handler + Gateway</td></tr>
+    <tr><td>MCP tool surface + OAuth connectors</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr><td>DLP rules (REDACT / BLOCK)</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr><td>Routing policies + budgets</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr><td>Human approvals for sensitive tools</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr class="group"><td colspan="4">Platform</td></tr>
+    <tr><td>Audit trail (console)</td><td><span class="y">✓</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+    <tr><td>Log retention</td><td>3 days*</td><td>30 days</td><td>90+ days</td></tr>
+    <tr><td>Audit-trail export API</td><td><span class="n">—</span></td><td><span class="n">—</span></td><td><span class="y">✓</span></td></tr>
+    <tr><td>Shared support channel + SLAs</td><td><span class="n">community</span></td><td><span class="y">✓</span></td><td><span class="y">✓</span></td></tr>
+  </table>
+  <p class="muted" style="margin-top:14px; font-size:13px;">*Self-hosting has no retention limit — it's your database.
+     Cloud-hosted retention applies to request and delivery logs. Program is on the public roadmap; nothing is
+     claimed as certified until it is.</p>
+</section>
+
+{% endblock %}

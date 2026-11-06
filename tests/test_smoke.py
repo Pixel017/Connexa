@@ -79,3 +79,72 @@ def test_starter_pack_tools_and_gmail_demo_lane(client):
     assert call("gmail__validate_credential")["status"] == "validated"
     sent = call("gmail__send_email", {"to": "someone@example.com", "subject": "Hi", "body": "demo"})
     assert sent["mode"] == "demo" and sent["sent"] is True
+
+
+# ---------------------------------------------------------------- public site
+
+def test_marketing_site_pages(client):
+    landing = client.get("/")
+    assert landing.status_code == 200
+    assert "Connexa" in landing.text and "Agent Handler" in landing.text
+    for path in ("/unified", "/agent-handler", "/gateway", "/workforce",
+                 "/pricing", "/security", "/integrations"):
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} must render"
+    assert "Common Model" in client.get("/unified").text
+    assert "SOC 2" in client.get("/security").text          # honest roadmap, present in copy
+
+
+def test_dashboard_accounts_and_audit_require_login(client):
+    assert client.get("/dashboard/accounts").url.path == "/login"
+    assert client.get("/dashboard/audit").url.path == "/login"
+
+
+# ---------------------------------------------------------------- sync engine
+
+def test_sync_engine_idempotent_restores_rows(client):
+    """A linked account syncs to Common Model rows; deleting rows then re-syncing
+    restores them, and a second sync reports 'unchanged' (the Merge-style contract)."""
+    from connexa.db import SessionLocal
+    from connexa.models import ApiKey, LinkedAccount, Ticket
+
+    db = SessionLocal()
+    try:
+        key = (db.query(ApiKey).filter(ApiKey.scope == "data", ApiKey.is_test == True)  # noqa: E712
+               .order_by(ApiKey.created_at).first().key_secret)
+    finally:
+        db.close()
+    headers = {"Authorization": f"Bearer {key}"}
+
+    token = client.post("/api/link-tokens", json={"categories": ["ticketing"]},
+                        headers=headers).json()["link_token"]
+    connected = client.post(f"/link/{token}/connect",
+                            json={"integration": "helpdesk", "end_user_name": "Sync Tester"})
+    assert connected.status_code == 200
+    public_token = connected.json()["public_token"]
+
+    def sync():
+        response = client.post(f"/api/ticketing/v1/accounts/{public_token}/sync", headers=headers)
+        assert response.status_code == 200
+        return response.json()
+
+    first = sync()
+    assert first["integration"] == "helpdesk" and first["unchanged"] >= 1
+
+    # wipe the normalized rows — the sync must restore them (not just the first run)
+    db = SessionLocal()
+    try:
+        account = db.query(LinkedAccount).filter(LinkedAccount.account_token == public_token).first()
+        wiped = (db.query(Ticket).filter(Ticket.linked_account_id == account.id)
+                 .delete())
+    finally:
+        db.commit()
+        db.close()
+    assert wiped >= 1
+
+    restored = sync()
+    assert restored["added"] == first["unchanged"], "sync must restore wiped rows"
+    assert restored["counts"]["Ticket"] == first["unchanged"]
+
+    again = sync()
+    assert again["added"] == 0 and again["updated"] == 0 and again["unchanged"] >= 1, "idempotent"

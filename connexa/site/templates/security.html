@@ -1,0 +1,75 @@
+{% extends "site_base.html" %}
+{% block title %}Security — Connexa{% endblock %}
+{% block body %}
+<section style="padding-top:64px;">
+  <span class="eyebrow">Security &amp; privacy</span>
+  <h1 style="font-size:40px; margin:12px 0 10px;">Built to be verified, not just believed</h1>
+  <p class="sec-sub">One platform holds your customers' credentials and business data. Here's exactly how it's
+     protected today — and what's still on the roadmap. No badge without the audit behind it.</p>
+</section>
+
+<section class="tight">
+  <div class="split">
+    <div class="card">
+      <h3>Scoped keys, not a master password</h3>
+      <p>Every credential is a scoped API key — data, gateway, agent, admin — hashed at rest in production
+         mode, maskable in logs, revocable from the console. Key creation and revocation are themselves
+         audited events.</p>
+    </div>
+    <div class="card">
+      <h3>Audit trail on everything</h3>
+      <p>Key changes, link tokens, account syncs, tool-access decisions — every meaningful action lands in
+         one append-only trail, browsable live from the console.</p>
+    </div>
+    <div class="card">
+      <h3>HMAC-signed webhooks</h3>
+      <p>Every delivery carries <code>X-Connexa-Signature</code> (sha256 over the raw body with your
+         endpoint secret) plus the event type — verify before you trust.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="split">
+    <div class="card">
+      <h3>Data-loss prevention for agents</h3>
+      <p>SecurityRule runs on agent tool traffic: REDACT or BLOCK credit-card numbers, emails, secret
+         tokens, or any regex you add — org-wide or per tool pack — before the tool executes.</p>
+    </div>
+    <div class="card">
+      <h3>Humans approve sensitive actions</h3>
+      <p>Sensitive tool calls open an approval request instead of executing. A human approves or rejects
+         it from the console; the decision is logged with actor and timestamp.</p>
+    </div>
+    <div class="card">
+      <h3>The strongest residency: your own disk</h3>
+      <p>Connectexa is self-hostable by design — the SQLite volume sits in a container you run, on machines
+         you control. Cloud postures can promise regions; self-hosting removes the question.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="sec">What's on the roadmap (stated as a roadmap)</h2>
+  <p class="sec-sub">We will not display a compliance badge we haven't earned. This is the honest sequence:</p>
+  <table class="cmp">
+    <tr><th style="width:30%;">Control</th><th>Today</th><th>Planned</th></tr>
+    <tr><td>Audit trail</td><td><span class="y">live</span></td><td>export API, retention policies</td></tr>
+    <tr><td>Social OAuth provider flows</td><td><span class="y">live (Slack / Notion / GitHub / Gmail)</span></td><td>provider-agnostic refresh engine</td></tr>
+    <tr><td>RBAC on console</td><td><span class="y">single admin token + scoped keys</span></td><td>multi-user roles</td></tr>
+    <tr><td>DLP on agent traffic</td><td><span class="y">live (REDACT / BLOCK)</span></td><td>outbound model-traffic scanning</td></tr>
+    <tr><td>SOC 2 Type II</td><td><span class="n">not certified</span></td><td>program start, then report</td></tr>
+    <tr><td>SSO / SAML for the console</td><td><span class="n">—</span></td><td>planned</td></tr>
+    <tr><td>Penetration testing</td><td><span class="n">not yet</span></td><td>annual program planned</td></tr>
+  </table>
+</section>
+
+<section class="tight">
+  <div class="cta-band">
+    <h2>Report a vulnerability</h2>
+    <p>Found something? Open a security advisory on GitHub (private reporting supported). We fix first,
+       disclose with credit.</p>
+    <a class="btn light" href="https://github.com/Pixel017/Connexa/security" target="_blank" rel="noopener">Security page on GitHub</a>
+  </div>
+</section>
+{% endblock %}

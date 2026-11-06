@@ -1,0 +1,33 @@
+{% extends "site_base.html" %}
+{% block title %}{{ p.eyebrow }} — Connexa{% endblock %}
+{% block body %}
+<section style="padding-top:64px;">
+  <span class="eyebrow">{{ p.eyebrow }}</span>
+  <h1 style="font-size:42px; margin:12px 0 14px; max-width:720px;">{{ p.title }}</h1>
+  <p class="sec-sub" style="font-size:17.5px;">{{ p.blurb }}</p>
+  <a class="btn dark" href="/dashboard">Try it now</a>
+  <a class="btn ghost" href="/docs" style="margin-left:10px;">API reference</a>
+</section>
+
+<section>
+  {% for num, title, body in p.features %}
+  <div class="step">
+    <div class="num">{{ num }}</div>
+    <div>
+      <h3>{{ title }}</h3>
+      <p>{{ body }}</p>
+    </div>
+    {% if loop.first %}<pre class="code"><span class="label">{{ p.code_title }}</span>{{ p.code }}</pre>{% else %}<div></div>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section class="tight">
+  <div class="cta-band">
+    <h2>Runs on your machine, today</h2>
+    <p>No sales call required — the console is live, the APIs are live, and the source is on GitHub.</p>
+    <a class="btn light" href="/dashboard">Open the console</a>
+    <a class="btn ghost" href="/pricing" style="margin-left:10px; color:#d6dbe2;">See pricing</a>
+  </div>
+</section>
+{% endblock %}

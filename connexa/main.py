@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .db import init_db, SessionLocal
+from .site.routes import router as site_router
 from .unified import router as unified_router
 from .link import router as link_router, api_router as link_api_router
 from .agent.handler import router as agent_router
@@ -29,9 +30,11 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=False,
 )
 
-# Order matters: dashboard covers "/", "/login", "/claim/*"; link covers "/link/*";
-# unified covers "/api/*"; agent covers "/api/v1/*"; gateway covers "/v1/*";
-# oauth covers "/oauth/*/callback" and the registered-user oauth start endpoint.
+# Order matters: site owns the public marketing pages ("/", /unified, /pricing, ...);
+# dashboard covers "/", "/login", "/claim/*" (its "/" redirects to /dashboard); link
+# covers "/link/*"; unified covers "/api/*"; agent covers "/api/v1/*"; gateway covers
+# "/v1/*"; oauth covers "/oauth/*/callback" and the registered-user oauth start endpoint.
+app.include_router(site_router)
 app.include_router(dashboard_router)
 app.include_router(link_router)
 app.include_router(link_api_router)
@@ -75,8 +78,9 @@ tool search: POST .../search/ with {"intent": "..."}
 security rules: GET /api/v1/security/rules/ ; mutate via POST /api/v1/security/rules/
 
 ## Data plane for customers
-POST /api/link-tokens -> open returned /link/{token} in a browser -> connect
+POST /api/link-tokens -> open returned /link/{token} in a browser -> connect (initial sync runs automatically)
 POST /api/{category}/v1/account-token/{public_token}
+POST /api/{category}/v1/accounts/{public_token}/sync -> on-demand idempotent sync (added/updated/unchanged + counts)
 GET/POST/PATCH /api/ticketing/v1/tickets ; /api/crm/v1/contacts ; /api/crm/v1/deals
 GET /api/ticketing/v1/meta/write-schema before writes; POST /api/ticketing/v1/passthrough for raw provider calls
 

@@ -1,0 +1,123 @@
+{% extends "site_base.html" %}
+{% block title %}Connexa — the business context engine for AI agents and products{% endblock %}
+{% block body %}
+
+<div class="hero">
+  <span class="eyebrow">Unified · Agent Handler · Gateway · Workforce</span>
+  <h1>Connect your product — and your agents — to every system the business runs on</h1>
+  <p class="sub">Connexa is a business connectivity platform in <b>one Python process</b>: a Common Model data
+     plane, a hosted link flow, an MCP tool server with OAuth, and an LLM gateway. Self-hostable. MIT licensed.</p>
+  <a class="btn dark" href="/dashboard">Start in the console</a>
+  <a class="btn ghost" href="/unified" style="margin-left:10px;">See how it works</a>
+
+  <div class="chiprow">
+    {% for c in connectors %}
+    <span class="chip"><b>{{ c.name }}</b>{% if c.real %} <span class="live">● live</span>{% endif %}</span>
+    {% endfor %}
+  </div>
+</div>
+
+<section class="tight">
+  <span class="eyebrow">One engine, two audiences</span>
+  <h2 class="sec">Powering products and teams</h2>
+  <div class="split">
+    <div class="tinted"><div class="inner">
+      <div class="tag">For products</div>
+      <h3 style="margin:10px 0 8px;">Ship integrations competitors can't match</h3>
+      <p>Embed the Connexa Link flow in your product, sync your customers' third-party data into normalized
+         Common Models, and serve it through one API your team designs against once.</p>
+      <a class="go" href="/unified">Explore Unified →</a>
+    </div></div>
+    <div class="tinted"><div class="inner">
+      <div class="tag">For agents &amp; workforce</div>
+      <h3 style="margin:10px 0 8px;">Give agents real accounts — under your control</h3>
+      <p>Agents authenticate through social OAuth, act through scoped MCP tool packs, and every sensitive
+         call passes DLP rules and human approval into an audit trail.</p>
+      <a class="go" href="/agent-handler">Explore Agent Handler →</a>
+    </div></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">The platform</span>
+  <h2 class="sec">Four products, one process</h2>
+  <p class="sec-sub">Every pillar shares one database, one auth model, and one audit trail — deploy the whole
+     platform with a single container.</p>
+  <div class="metrics">
+    <div class="metric"><div class="n">{{ connectors|length }}</div><div class="l">connectors, with a written SDK to add yours</div></div>
+    <div class="metric"><div class="n">36+</div><div class="l">agent tools exposed over MCP</div></div>
+    <div class="metric"><div class="n">4 planes</div><div class="l">data · link · agent · gateway, one FastAPI process</div></div>
+    <div class="metric"><div class="n">1 file</div><div class="l">SQLite storage — swap to Postgres when you need it</div></div>
+  </div>
+</section>
+
+<section class="tight">
+  <div class="split">
+    <div class="card">
+      <div class="tag">Data</div>
+      <h3 style="margin-top:8px;">Connexa Unified</h3>
+      <p>Linked accounts, hosted link flow, sync engine, Common Models with remote_data, write-schema
+         discovery, passthrough, webhooks.</p>
+      <a class="go" href="/unified">Learn more →</a>
+    </div>
+    <div class="card">
+      <div class="tag">Agents</div>
+      <h3 style="margin-top:8px;">Agent Handler</h3>
+      <p>Self-serve signup, OAuth social-login, scoped tool packs, reauth contracts, DLP rules,
+         approval flow — all over MCP.</p>
+      <a class="go" href="/agent-handler">Learn more →</a>
+    </div>
+    <div class="card">
+      <div class="tag">Models</div>
+      <h3 style="margin-top:8px;">Gateway</h3>
+      <p>OpenAI-compatible chat + responses APIs, routing policies with ordered failover,
+         credit metering, hard budgets.</p>
+      <a class="go" href="/gateway">Learn more →</a>
+    </div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">How it works</span>
+  <h2 class="sec">From link token to normalized data in four calls</h2>
+  <div class="step">
+    <div class="num">STEP 01</div>
+    <div>
+      <h3>Your end user links an account</h3>
+      <p>Mint a link token, send the hosted browser flow. Out comes an account token scoped to one
+         linked account in one category — the initial sync runs automatically.</p>
+    </div>
+    <pre class="code"><span class="label">request</span>POST /api/link-tokens
+Authorization: Bearer &lt;data key&gt;</pre>
+  </div>
+  <div class="step">
+    <div class="num">STEP 02</div>
+    <div>
+      <h3>Sync pulls provider data into Common Models</h3>
+      <p>Idempotent and diff-aware: every run reports added / updated / unchanged, fires
+         <code>LinkedAccount.synced</code> webhooks, and stamps the account's last sync time.</p>
+    </div>
+    <pre class="code"><span class="label">request</span>POST /api/ticketing/v1/accounts/&lt;token&gt;/sync</pre>
+  </div>
+  <div class="step">
+    <div class="num">STEP 03</div>
+    <div>
+      <h3>Serve normalized data — or write it back</h3>
+      <p>Discover the schema before writing; every row carries the raw provider payload in
+         <code>remote_data</code>. Passthrough gets you to the provider's own API when you need it.</p>
+    </div>
+    <pre class="code"><span class="label">request</span>GET /api/ticketing/v1/tickets
+X-Account-Token: &lt;account token&gt;</pre>
+  </div>
+</section>
+
+<section class="tight">
+  <div class="cta-band">
+    <h2>Stop gluing integrations together yourself</h2>
+    <p>Clone it, run it, own it. The whole platform — data plane, link flow, agent handler, gateway —
+       boots in one process and ships as one container.</p>
+    <a class="btn light" href="/dashboard">Open the console</a>
+    <a class="btn ghost" href="/docs" style="margin-left:10px; color:#d6dbe2;">Read the API docs</a>
+  </div>
+</section>
+{% endblock %}

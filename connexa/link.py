@@ -107,16 +107,16 @@ def connect(token_value: str, data: ConnectRequest, background: BackgroundTasks,
                             account_token=account_token, credentials={})
     db.add(account)
 
-    # Seed normalized rows from the provider's sample payload (a real connector would sync here).
-    from .seed_data import populate_linked_account
-    populate_linked_account(db, account)
-    account.last_synced_at = now()
+    # Initial pull: provider -> Common Model sync (same engine as every later sync).
+    from .sync import run_sync
+    summary = run_sync(db, account, background=background, actor="link")
 
     token.status = "used"
     db.commit()
 
     audit(db, event_type="LINKED_ACCOUNT_CREATED",
-          description=f"{category}/{connector.slug}", org_id=token.org_id)
+          description=f"{category}/{connector.slug}: initial sync +{summary['added']}",
+          org_id=token.org_id)
     usage(db, plane="data", kind="initial_sync", org_id=token.org_id, units=1.0, credits=0)
     emit(db, background, event="LinkedAccount.linked", org_id=token.org_id, payload_data={
         "linked_account_id": account.id, "category": category,

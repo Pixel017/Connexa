@@ -1,0 +1,70 @@
+{% extends "site_base.html" %}
+{% block title %}Integrations — Connexa{% endblock %}
+{% block body %}
+<section style="padding-top:64px;">
+  <span class="eyebrow">Integrations</span>
+  <h1 style="font-size:40px; margin:12px 0 10px;">Every connector, both lanes</h1>
+  <p class="sec-sub">"Tool lane" connectors give agents OAuth-signed actions over MCP. "Data lane" connectors
+     back Linked Accounts — they sync provider payloads into Common Model rows. The SDK lets you add your own
+     declaratively.</p>
+</section>
+
+<section class="tight">
+  <h2 class="sec">Data lane — back Linked Accounts</h2>
+  <table class="cmp">
+    <tr><th style="width:26%;">Connector</th><th>Slug</th><th>Categories</th><th>Auth</th><th>Status</th></tr>
+    {% for c in data_connectors %}
+    <tr>
+      <td>{{ c.name }}</td>
+      <td><code>{{ c.slug }}</code></td>
+      <td>{% for cat in c.categories %}{{ cat }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+      <td>{{ c.auth }}</td>
+      <td>{% if c.real %}<span class="pill-ok">live lane</span>{% else %}<span class="pill-dev">sample lane</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2 class="sec" style="margin-top:38px;">Tool lane — agent actions over MCP</h2>
+  <table class="cmp">
+    <tr><th style="width:26%;">Connector</th><th>Slug</th><th>Auth</th><th>Status</th></tr>
+    {% for c in tool_connectors %}
+    <tr>
+      <td>{{ c.name }}</td>
+      <td><code>{{ c.slug }}</code></td>
+      <td>{{ c.auth }}</td>
+      <td>{% if c.real %}<span class="pill-ok">live lane</span>{% else %}<span class="pill-dev">sample lane</span>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section>
+  <h2 class="sec">Add your own in an afternoon</h2>
+  <div class="step">
+    <div class="num">RECIPE 01</div>
+    <div><h3>Declarative, for clean REST providers</h3>
+      <p>Pure <code>RestCall</code> declarations — paths, auth placement, schema. No HTTP plumbing: the base
+         connector handles tokens, refresh, and the reauth contract.</p></div>
+    <pre class="code"><span class="label">sdk</span>SimpleRestConnector(
+    slug="acme", base_url="https://api.acme.com",
+    calls=[RestCall(name="list_tickets", method="GET", path="/tickets"), …])</pre>
+  </div>
+  <div class="step">
+    <div class="num">RECIPE 02</div>
+    <div><h3>Full class, for quirky providers</h3>
+      <p>Subclass the base connector and write tool handlers the same way the Slack, Notion, GitHub and
+         Gmail connectors do — with demo and live lanes side by side.</p></div>
+    <pre class="code"><span class="label">sdk</span>docs/connector-sdk.md — both recipes + the live-lane checklist</pre>
+  </div>
+</section>
+
+<section class="tight">
+  <div class="cta-band">
+    <h2>Missing the one connector you actually need?</h2>
+    <p>Request it on GitHub — first movers get prioritized. Or ship it yourself with the SDK and a pull
+       request.</p>
+    <a class="btn light" href="https://github.com/Pixel017/Connexa/issues" target="_blank" rel="noopener">Request a connector</a>
+    <a class="btn ghost" href="https://github.com/Pixel017/Connexa/blob/main/docs/connector-sdk.md" target="_blank" rel="noopener" style="margin-left:10px; color:#d6dbe2;">Read the SDK doc</a>
+  </div>
+</section>
+{% endblock %}

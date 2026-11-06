@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Linked Accounts — Connexa Console{% endblock %}
+{% block body %}
+<h1>Linked Accounts</h1>
+<p class="muted">Every customer connection across categories. Sync pulls provider data into the Common Model rows (idempotent — re-running never duplicates).</p>
+
+{% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+
+{% if accounts %}
+<table>
+  <tr><th>Integration</th><th>Category</th><th>Connected as</th><th>Status</th><th>Account token</th>
+      <th>Tickets</th><th>Contacts</th><th>Deals</th><th>Last sync</th><th></th></tr>
+  {% for a in accounts %}
+  <tr>
+    <td><strong>{{ a.connector_name }}</strong><br><span class="muted">{{ a.integration }}</span></td>
+    <td>{{ a.category }}</td>
+    <td>{{ a.end_user_name or "—" }}</td>
+    <td>{% if a.status == "live" %}<span class="pill ok">live</span>{% else %}<span class="pill no">{{ a.status }}</span>{% endif %}</td>
+    <td><code>{{ a.account_token[:9] }}…</code></td>
+    <td>{{ a.tickets_n }}</td>
+    <td>{{ a.contacts_n }}</td>
+    <td>{{ a.deals_n }}</td>
+    <td>{{ iso(a.last_synced_at) or "never" }}</td>
+    <td>
+      <form class="inline" method="post" action="/dashboard/accounts/sync">
+        <input type="hidden" name="account_id" value="{{ a.id }}">
+        <button class="small" type="submit">Sync now</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">No linked accounts yet. Create a link token on the <a href="/dashboard/link">Link &amp; Data</a> page and connect through the browser flow — the initial sync runs automatically.</p>
+{% endif %}
+
+<h2>Sync API</h2>
+<p class="muted">The same operation is available to your backend:</p>
+<div class="code">POST /api/{category}/v1/accounts/{public_token}/sync
+Authorization: Bearer &lt;data key&gt;
+→ {"integration": "jira", "added": 0, "updated": 0, "unchanged": 12, "counts": {"Ticket": 12}}</div>
+{% endblock %}

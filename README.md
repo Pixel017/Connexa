@@ -38,6 +38,7 @@ Then open **http://127.0.0.1:8000** .
 
 | Surface | URL |
 |---|---|
+| **Marketing site** | `/` (landing) · `/unified` · `/agent-handler` · `/gateway` · `/workforce` · `/pricing` · `/security` · `/integrations` |
 | API docs (OpenAPI UI) | `/docs` |
 | Agent map for LLMs | `/llms.txt`, `/llms-full.txt` |
 | Admin console | `/login` (token: `dev-admin` or `CONNEXA_ADMIN_TOKEN`) |
@@ -89,6 +90,7 @@ Key endpoints:
 | `GET  /api/ticketing/v1/meta/write-schema` | discover fields + enums **before** writing |
 | `POST /api/ticketing/v1/passthrough` | escape hatch: raw method/path to the provider's own API |
 | `POST /api/{cat}/v1/account-token/{public_token}` | exchange public token for account token |
+| `POST /api/{cat}/v1/accounts/{public_token}/sync` | **on-demand sync**: pulls provider payloads into Common Model rows — idempotent, diff-aware (`added`/`updated`/`unchanged`), fires `LinkedAccount.synced` |
 | `GET  /api/linked-accounts` | inventory of connected accounts |
 
 Categories today: **ticketing** (`Ticket`) and **crm** (`Contact`, `Deal`). Writes are validated against the Common Model — wrong enum values get a 400 with the allowed choices in the body.
@@ -241,9 +243,11 @@ Adding a connector = one class implementing the `Connector` interface (`connexa/
 Server-rendered (Jinja2, zero npm):
 
 - **Overview** — counts for linked accounts, tickets, CRM rows, agent orgs, live usage meter
+- **Linked Accounts** — Merge-style account table with per-model row counts, last-sync stamp, and a **Sync now** button (runs the same sync engine as the API)
 - **Link & Data** — create link tokens (shows the URL), inspect linked accounts
 - **API Keys** — create/revoke data, gateway, and admin keys (created key shown once)
 - **Webhooks** — endpoints, delivery receipts with HTTP statuses
+- **Audit Trail** — full platform accountability stream (keys, links, syncs, approvals)
 - **Agent Handler** — agent orgs + claim state, tool packs + connectors, tool-access review queue, full audit stream
 - **Gateway** — model catalog with pricing, routing policies (make default), monthly budget, gateway usage
 
