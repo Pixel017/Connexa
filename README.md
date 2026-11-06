@@ -1,12 +1,9 @@
 # Connexa
 
-![tests](https://img.shields.io/badge/tests-3%20passing-brightgreen)
+![CI](https://github.com/Pixel017/Connexa/actions/workflows/ci.yml/badge.svg)
 ![python](https://img.shields.io/badge/python-3.13%2B-blue)
 ![license](https://img.shields.io/badge/license-MIT-green)
 ![docker](https://img.shields.io/badge/docker-ready-2496ED)
-
-<!-- After the first push, swap the static badge for the live one:
-     ![CI](https://github.com/YOUR_USER/connexa/actions/workflows/ci.yml/badge.svg) -->
 
 **A unified business connectivity platform in one process** — original code implementing the four architectural pillars of a commercial "unified API" product:
 
