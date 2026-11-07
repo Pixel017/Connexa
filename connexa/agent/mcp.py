@@ -96,6 +96,67 @@ def _tool_index(pack: ToolPack) -> dict:
     return index
 
 
+# ---------------------------------------------------------------- workforce built-ins
+
+_BUILTIN_TOOLS = [
+    {"name": "memory_save",
+     "description": "Save a note into the org's shared employee-AI memory (context layer).",
+     "inputSchema": {"type": "object",
+                     "properties": {"content": {"type": "string"},
+                                    "tags": {"type": "array", "items": {"type": "string"}}},
+                     "required": ["content"]},
+     "annotations": {"title": "Save memory"}, "credit_type": "low"},
+    {"name": "memory_search",
+     "description": "Search the org's shared employee-AI memory by keyword.",
+     "inputSchema": {"type": "object",
+                     "properties": {"query": {"type": "string"},
+                                    "limit": {"type": "integer", "minimum": 1, "maximum": 25}},
+                     "required": ["query"]},
+     "annotations": {"title": "Search memory"}, "credit_type": "low"},
+    {"name": "skills_list",
+     "description": "List the org's shared skills library (playbooks) available to you.",
+     "inputSchema": {"type": "object", "properties": {}},
+     "annotations": {"title": "List skills"}, "credit_type": "low"},
+]
+
+
+def _run_builtin_tool(db: Session, org, user, tool_name: str, arguments: dict):
+    """Workforce-plane tools available to every registered agent user."""
+    from ..models import Skill, WorkforceMemory
+    from ..utils import iso, uid
+
+    if tool_name == "memory_save":
+        content = str(arguments.get("content") or "").strip()
+        if not content:
+            return _mcp_result(json.dumps({"error_reason": "missing_content",
+                                           "error_message": "memory_save requires 'content'."}), True)
+        memory = WorkforceMemory(id=uid(), org_id=org.id, team_id=None,
+                                 author=f"agent:{user.origin_user_name}", content=content,
+                                 tags=arguments.get("tags") or [])
+        db.add(memory)
+        db.commit()
+        return _mcp_result(json.dumps({"saved": True, "id": memory.id, "content": memory.content}), False)
+
+    if tool_name == "memory_search":
+        query = str(arguments.get("query") or "").strip()
+        limit = int(arguments.get("limit") or 10)
+        rows_query = db.query(WorkforceMemory).filter(WorkforceMemory.org_id == org.id)
+        if query:
+            rows_query = rows_query.filter(WorkforceMemory.content.like(f"%{query}%"))
+        rows = rows_query.order_by(WorkforceMemory.created_at.desc()).limit(limit).all()
+        return _mcp_result(json.dumps({"count": len(rows), "memories": [
+            {"id": row.id, "content": row.content, "author": row.author, "tags": row.tags,
+             "created_at": iso(row.created_at)} for row in rows]}, default=str), False)
+
+    if tool_name == "skills_list":
+        rows = db.query(Skill).filter(Skill.org_id == org.id).order_by(Skill.name).all()
+        return _mcp_result(json.dumps({"count": len(rows), "skills": [
+            {"name": row.name, "instructions": row.instructions, "tags": row.tags,
+             "version": row.version, "team_id": row.team_id} for row in rows]}, default=str), False)
+
+    return None
+
+
 def _mcp_result(content_text: str, is_error: bool, extra_meta: dict | None = None) -> dict:
     meta = {"dev.connexa/request_id": request_id()}
     if extra_meta:
@@ -158,6 +219,7 @@ async def mcp_endpoint(pack_id: str, user_id: str, request: Request,
                      "inputSchema": _outer_schema(spec), "annotations": spec.annotations,
                      "credit_type": spec.credit_type}
             entries.append(entry)
+        entries.extend(_BUILTIN_TOOLS)
         return reply({"jsonrpc": "2.0", "id": msg_id,
                       "result": {"tools": entries}})
 
@@ -175,6 +237,9 @@ async def mcp_endpoint(pack_id: str, user_id: str, request: Request,
 
 def run_tool(db: Session, org, key, user, pack: ToolPack, tool_name: str, arguments: dict,
              base_url: str = "") -> dict:
+    builtin = _run_builtin_tool(db, org, user, tool_name, arguments)
+    if builtin is not None:
+        return builtin
     index = _tool_index(pack)
     found = index.get(tool_name)
     if not found:

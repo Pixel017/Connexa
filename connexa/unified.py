@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from .security import data_plane_key
-from .models import LinkedAccount, Ticket, Contact, Deal, Org, ApiKey
+from .models import LinkedAccount, SyncIssue, Ticket, Contact, Deal, Org, ApiKey
 from .common_models import COMMON_MODELS, TICKET_STATUSES, TICKET_PRIORITIES, DEAL_STAGES, CONTACT_STAGES
 from .metering import usage, audit
 from .utils import uid, now, iso
@@ -29,6 +29,28 @@ from .connectors.registry import registry
 router = APIRouter(prefix="/api")
 
 # ------------------------------------------------------------ row mappers
+
+
+def _apply_field_scopes(key, model: str, payload: dict) -> dict:
+    """Field-level scopes on the presenting key: {"Ticket": {"exclude": [...]}} or
+    {"Ticket": {"include": [...]}} — data minimization enforced at the response layer."""
+    scopes = (getattr(key, "field_scopes", None) or {})
+    rule = scopes.get(model) if isinstance(scopes, dict) else None
+    if not rule:
+        return payload
+    if isinstance(rule.get("include"), list):
+        allowed = set(rule["include"])
+        return {name: value for name, value in payload.items() if name in allowed}
+    if isinstance(rule.get("exclude"), list):
+        blocked = set(rule["exclude"])
+        return {name: value for name, value in payload.items() if name not in blocked}
+    return payload
+
+
+def _minimize(payload: dict, include_remote_data: bool) -> dict:
+    if include_remote_data:
+        return payload
+    return {name: value for name, value in payload.items() if name != "remote_data"}
 
 
 def _row_to_ticket(t: Ticket) -> dict:
@@ -63,6 +85,19 @@ def _account(authorization_required_account: str | None, db: Session, org: Org) 
     )
     if not account:
         raise HTTPException(404, {"detail": "Unknown account token for this organization."})
+    return account
+
+
+def _resolve_public_token(category: str, public_token: str, org: Org, db: Session) -> LinkedAccount:
+    if category not in ("ticketing", "crm"):
+        raise HTTPException(404, {"detail": f"Unknown category '{category}'."})
+    account = (db.query(LinkedAccount)
+               .filter(LinkedAccount.account_token == public_token, LinkedAccount.org_id == org.id)
+               .first())
+    if not account:
+        raise HTTPException(404, {"detail": "Unknown public token."})
+    if account.category != category:
+        raise HTTPException(400, {"detail": f"This public token belongs to category '{account.category}'."})
     return account
 
 
@@ -117,19 +152,71 @@ def list_linked_accounts(auth=Depends(data_plane_key), db: Session = Depends(get
 def sync_account(category: str, public_token: str, background: BackgroundTasks,
                  auth=Depends(data_plane_key), db: Session = Depends(get_db)):
     key, org = auth
-    if category not in ("ticketing", "crm"):
-        raise HTTPException(404, {"detail": f"Unknown category '{category}'."})
-    account = (db.query(LinkedAccount)
-               .filter(LinkedAccount.account_token == public_token, LinkedAccount.org_id == org.id)
-               .first())
-    if not account:
-        raise HTTPException(404, {"detail": "Unknown public token."})
-    if account.category != category:
-        raise HTTPException(400, {"detail": f"This public token belongs to category '{account.category}'."})
+    account = _resolve_public_token(category, public_token, org, db)
     from .sync import run_sync
     summary = run_sync(db, account, background=background, actor="api")
     usage(db, plane="data", kind="sync_request", org_id=org.id, key_id=key.id, units=1.0, credits=0)
     return summary
+
+
+class SyncFrequency(BaseModel):
+    seconds: int = Field(ge=0, le=86_400 * 7)   # 0 = manual only
+
+
+@router.post("/{category}/v1/accounts/{public_token}/sync-frequency")
+def set_sync_frequency(category: str, public_token: str, data: SyncFrequency,
+                       auth=Depends(data_plane_key), db: Session = Depends(get_db)):
+    """Scheduled background sync: the platform re-pulls this account automatically."""
+    key, org = auth
+    account = _resolve_public_token(category, public_token, org, db)
+    account.sync_frequency_seconds = data.seconds
+    db.commit()
+    audit(db, event_type="SYNC_SCHEDULE_SET", org_id=org.id, key_id=key.id,
+          description=f"{account.integration}: every {data.seconds}s" if data.seconds
+          else f"{account.integration}: manual only")
+    return {"integration": account.integration, "sync_frequency_seconds": account.sync_frequency_seconds,
+            "scheduled": account.sync_frequency_seconds > 0}
+
+
+@router.get("/{category}/v1/issues")
+def list_issues(category: str, auth=Depends(data_plane_key), db: Session = Depends(get_db),
+                status: str = "open"):
+    """Sync health for this org's accounts (Merge-style issues surface)."""
+    _key, org = auth
+    query = db.query(SyncIssue).filter(SyncIssue.org_id == org.id)
+    query = query.filter(SyncIssue.resolved == False) if status == "open" else query  # noqa: E712
+    rows = query.order_by(SyncIssue.created_at.desc()).limit(100).all()
+    return {"count": len(rows), "status": status, "issues": [
+        {"id": issue.id, "linked_account_id": issue.linked_account_id, "model": issue.model,
+         "severity": issue.severity, "message": issue.message,
+         "created_at": iso(issue.created_at)} for issue in rows]}
+
+
+@router.delete("/{category}/v1/accounts/{public_token}")
+def erase_account(category: str, public_token: str, auth=Depends(data_plane_key),
+                  db: Session = Depends(get_db)):
+    """Access & erasure: remove a linked account and every normalized row derived
+    from it. Required for end-user deletion requests (GDPR-style erasure)."""
+    key, org = auth
+    if category not in ("ticketing", "crm"):
+        raise HTTPException(404, {"detail": f"Unknown category '{category}'."})
+    account = db.query(LinkedAccount).filter(
+        LinkedAccount.account_token == public_token, LinkedAccount.org_id == org.id).first()
+    if not account:
+        raise HTTPException(404, {"detail": "Unknown public token."})
+    if account.category != category:
+        raise HTTPException(400, {"detail": f"This public token belongs to category '{account.category}'."})
+    counts = {"Ticket": 0, "Contact": 0, "Deal": 0}
+    counts["Ticket"] = db.query(Ticket).filter(Ticket.linked_account_id == account.id).delete()
+    counts["Contact"] = db.query(Contact).filter(Contact.linked_account_id == account.id).delete()
+    counts["Deal"] = db.query(Deal).filter(Deal.linked_account_id == account.id).delete()
+    db.query(SyncIssue).filter(SyncIssue.linked_account_id == account.id).delete()
+    integration, erased_id = account.integration, account.id
+    db.delete(account)
+    db.commit()
+    audit(db, event_type="ERASURE_REQUEST_COMPLETED", org_id=org.id, key_id=key.id,
+          description=f"{integration}: account {erased_id} + {counts} rows removed")
+    return {"erased": True, "integration": integration, "rows_deleted": counts}
 
 
 # ------------------------------------------------------------ ticketing
@@ -152,7 +239,8 @@ class TicketUpdate(BaseModel):
 
 
 @router.get("/ticketing/v1/tickets")
-def list_tickets(limit: int = 20, offset: int = 0, auth=Depends(data_plane_key),
+def list_tickets(limit: int = 20, offset: int = 0, include_remote_data: bool = True,
+                 auth=Depends(data_plane_key),
                  db: Session = Depends(get_db), account_token: str | None = Header(default=None, alias="X-Account-Token")):
     key, org = auth
     account = _account(account_token, db, org)
@@ -160,18 +248,20 @@ def list_tickets(limit: int = 20, offset: int = 0, auth=Depends(data_plane_key),
             .order_by(Ticket.created_at.desc()).limit(limit).offset(offset).all())
     usage(db, plane="data", kind="tickets_list", org_id=org.id, key_id=key.id, units=1.0, credits=0)
     return {"count": len(rows), "next": _next_cursor(limit, offset),
-            "results": [_row_to_ticket(r) for r in rows]}
+            "results": [_minimize(_apply_field_scopes(key, "Ticket", _row_to_ticket(r)),
+                                  include_remote_data) for r in rows]}
 
 
 @router.get("/ticketing/v1/tickets/{ticket_id}")
-def get_ticket(ticket_id: str, auth=Depends(data_plane_key), db: Session = Depends(get_db),
+def get_ticket(ticket_id: str, include_remote_data: bool = True, auth=Depends(data_plane_key),
+               db: Session = Depends(get_db),
                account_token: str | None = Header(default=None, alias="X-Account-Token")):
     key, org = auth
     account = _account(account_token, db, org)
     row = db.query(Ticket).filter(Ticket.id == ticket_id, Ticket.linked_account_id == account.id).first()
     if not row:
         raise HTTPException(404, {"detail": f"No Ticket found with id={ticket_id}."})
-    return _row_to_ticket(row)
+    return _minimize(_apply_field_scopes(key, "Ticket", _row_to_ticket(row)), include_remote_data)
 
 
 @router.post("/ticketing/v1/tickets", status_code=201)
@@ -271,14 +361,16 @@ class DealCreate(BaseModel):
 
 
 @router.get("/crm/v1/contacts")
-def list_contacts(limit: int = 20, offset: int = 0, auth=Depends(data_plane_key), db: Session = Depends(get_db),
+def list_contacts(limit: int = 20, offset: int = 0, include_remote_data: bool = True,
+                  auth=Depends(data_plane_key), db: Session = Depends(get_db),
                   account_token: str | None = Header(default=None, alias="X-Account-Token")):
     key, org = auth
     account = _account(account_token, db, org)
     rows = (db.query(Contact).filter(Contact.linked_account_id == account.id)
             .order_by(Contact.created_at.desc()).limit(limit).offset(offset).all())
     return {"count": len(rows), "_next": _next_cursor(limit, offset),
-            "results": [_row_to_contact(r) for r in rows]}
+            "results": [_minimize(_apply_field_scopes(key, "Contact", _row_to_contact(r)),
+                                  include_remote_data) for r in rows]}
 
 
 @router.post("/crm/v1/contacts", status_code=201)
@@ -304,14 +396,16 @@ def create_contact(data: ContactCreate, background: BackgroundTasks, auth=Depend
 
 
 @router.get("/crm/v1/deals")
-def list_deals(limit: int = 20, offset: int = 0, auth=Depends(data_plane_key), db: Session = Depends(get_db),
+def list_deals(limit: int = 20, offset: int = 0, include_remote_data: bool = True,
+               auth=Depends(data_plane_key), db: Session = Depends(get_db),
                account_token: str | None = Header(default=None, alias="X-Account-Token")):
     key, org = auth
     account = _account(account_token, db, org)
     rows = (db.query(Deal).filter(Deal.linked_account_id == account.id)
             .order_by(Deal.created_at.desc()).limit(limit).offset(offset).all())
     return {"count": len(rows), "_next": _next_cursor(limit, offset),
-            "results": [_row_to_deal(r) for r in rows]}
+            "results": [_minimize(_apply_field_scopes(key, "Deal", _row_to_deal(r)),
+                                  include_remote_data) for r in rows]}
 
 
 @router.post("/crm/v1/deals", status_code=201)

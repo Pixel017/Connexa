@@ -103,26 +103,36 @@ PRODUCTS: dict[str, dict] = {
     "workforce": {
         "eyebrow": "Connexa for Workforce",
         "title": "Govern the AI your whole company uses",
-        "blurb": ("Approve what agents and employees can do — then watch every action in one "
-                  "audit trail. Shipping today inside the console; the full IdP and skills "
-                  "library are on the public roadmap."),
+        "blurb": ("Provision teams from your IdP, approve exactly which models each team may call, cap what "
+                  "they spend, scan everything leaving for a model — and give every agent shared skills and "
+                  "memory. All enforced in-path, all in one audit trail."),
         "features": [
-            ("01", "Approvals before access",
-             "Sensitive tool calls open a ToolAccessRequest; a human approves or rejects it "
-             "from the console. Agents wait politely — and tell you what they wanted."),
-            ("02", "Data-loss prevention built in",
-             "SecurityRule runs on agent traffic: REDACT or BLOCK credit cards, emails, "
-             "secret tokens, or your own regex patterns, org-wide or per tool pack."),
-            ("03", "Spend control for every org",
-             "Gateway budgets and credit metering cap what any team's agents can burn — "
-             "visible live from the console."),
+            ("01", "IdP / SCIM 2.0 provisioning",
+             "Point Okta or Entra at /scim/v2. Directory users land as registered users; groups become teams. "
+             "Membership in a team is what grants its tool pack, model allowlist and budget — deprovision once, "
+             "everywhere."),
+            ("02", "Control model access and spend",
+             "Per-team model allowlists (the gateway refuses unapproved models and filters failover chains) plus "
+             "hard monthly credit budgets per team — calls are refused, not merely logged, once a team's budget "
+             "is spent."),
+            ("03", "DLP on outbound model traffic",
+             "Prompts are scanned before they reach any model: REDACT or BLOCK credit cards, emails, secret "
+             "tokens, or your own regex — the same rule engine that guards agent tool traffic, now on the "
+             "gateway."),
+            ("04", "Shared skills + employee AI memory",
+             "A versioned skills library (playbooks every agent follows) and org-wide memory — exposed over REST "
+             "and as memory_save / memory_search / skills_list MCP tools inside every agent's tool list."),
         ],
-        "code_title": "On the public roadmap",
+        "code_title": "Provision a governed team in one SCIM call",
         "code": (
-            "- IdP-driven provisioning (Okta / Entra SCIM) mapping teams -> tool packs\n"
-            "- Per-team model allowlists + shared skills library\n"
-            "- DLP on outbound model traffic (today it guards agent tool traffic)\n"
-            "- Scheduled background sync (today: API- and console-triggered)"),
+            "POST /scim/v2/Groups\n"
+            '{"displayName": "Support", "externalId": "okta-123",\n'
+            ' "members": [{"value": "scim-user-id"}],\n'
+            ' "connexa_extensions": {\n'
+            '   "allowed_models": ["connexa-echo"],\n'
+            '   "monthly_credit_budget": 500}}\n'
+            "# then the gateway enforces it:\n"
+            "POST /v1/chat/completions  -H 'X-Connexa-Team: Support'"),
     },
 }
 

@@ -37,6 +37,7 @@ class ApiKey(Base):
     key_masked: Mapped[str] = mapped_column(String(40))
     is_test: Mapped[bool] = mapped_column(Boolean, default=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    field_scopes: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"Ticket": {"exclude": [...]}}
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
@@ -66,6 +67,8 @@ class LinkedAccount(Base):
     credentials: Mapped[dict] = mapped_column(JSON, default=dict)
     linked_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    sync_frequency_seconds: Mapped[int] = mapped_column(Integer, default=0)  # 0 = manual only
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)  # selective_sync, ignored_remote_ids
 
 
 # ---------------------------------------------------------------- data plane
@@ -164,6 +167,8 @@ class RegisteredUser(Base):
     origin_company_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     credentials: Mapped[dict] = mapped_column(JSON, default=dict)  # connector_slug -> credential dict
     is_test: Mapped[bool] = mapped_column(Boolean, default=False)
+    idp_external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)  # SCIM externalId
+    active: Mapped[bool] = mapped_column(Boolean, default=True)   # SCIM deprovisioning flips this
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
@@ -226,6 +231,74 @@ class Budget(Base):
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), index=True)
     period: Mapped[str] = mapped_column(String(20), default="monthly")
     credits_total: Mapped[int] = mapped_column(Integer, default=10_000)
+    team_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # workforce team budget
+
+
+# ---------------------------------------------------------------- workforce plane
+
+class WorkforceTeam(Base):
+    """A provisioning unit synced from the IdP (SCIM Groups) or created over the API.
+
+    allowed_models ["*"] permits every catalog model; a concrete slug list is a
+    per-team model allowlist enforced by the gateway. monthly_credit_budget is a
+    hard per-team spend cap (402 once exhausted)."""
+    __tablename__ = "workforce_teams"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    idp_external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    tool_pack_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    allowed_models: Mapped[list] = mapped_column(JSON, default=list)      # ["*"] or slugs
+    monthly_credit_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class TeamMembership(Base):
+    __tablename__ = "team_memberships"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    team_id: Mapped[str] = mapped_column(ForeignKey("workforce_teams.id"), index=True)
+    registered_user_id: Mapped[str] = mapped_column(ForeignKey("registered_users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(20), default="member")       # member | manager
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class Skill(Base):
+    """Shared skills library: named, versioned playbooks pushed to agent tooling."""
+    __tablename__ = "skills"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), index=True)
+    team_id: Mapped[str | None] = mapped_column(String(32), nullable=True)  # None = org-wide
+    name: Mapped[str] = mapped_column(String(120))
+    instructions: Mapped[str] = mapped_column(Text)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class WorkforceMemory(Base):
+    """Employee AI context: org-scoped memory rows agents can save and search."""
+    __tablename__ = "workforce_memories"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), index=True)
+    team_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    author: Mapped[str] = mapped_column(String(160), default="human")
+    content: Mapped[str] = mapped_column(Text)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class SyncIssue(Base):
+    """Sync health: one row per sync error, surfaced in /issues and the console."""
+    __tablename__ = "sync_issues"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), index=True)
+    linked_account_id: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(40), default="sync")
+    severity: Mapped[str] = mapped_column(String(20), default="error")    # error | warning
+    message: Mapped[str] = mapped_column(Text)
+    resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
 # ---------------------------------------------------------------- metering + audit
@@ -238,6 +311,7 @@ class UsageLog(Base):
     org_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     agent_org_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     key_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    team_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String(60))              # tool_call, llm_request, sync, ...
     credit_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     units: Mapped[float] = mapped_column(Float, default=0.0)

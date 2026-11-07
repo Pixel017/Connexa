@@ -16,6 +16,8 @@ from .agent.mcp import router as mcp_router
 from .gateway.api import router as gateway_router
 from .dashboard.routes import router as dashboard_router
 from .oauth_routes import router as oauth_router
+from .workforce import router as workforce_router, scim_router
+from . import scheduler
 
 app = FastAPI(
     title="Connexa",
@@ -43,6 +45,8 @@ app.include_router(unified_router)
 app.include_router(agent_router)
 app.include_router(mcp_router)
 app.include_router(gateway_router)
+app.include_router(workforce_router)
+app.include_router(scim_router)
 
 
 @app.get("/healthz")
@@ -52,18 +56,20 @@ def healthz():
 
 _llms = """# Connexa
 
-Connexa is a self-contained business connectivity platform. Four planes in one process:
+Connexa is a self-contained business connectivity platform. Five planes in one process:
 
 - llms-full.txt for machine-readable endpoint docs
 - /docs for the OpenAPI UI
 - Data plane: /api/{ticketing,crm}/v1/... with Bearer data key + X-Account-Token
 - Link flow: POST /api/link-tokens (connect a linked account via the browser)
 - Agent Handler: POST /api/v1/agent/signup/ (self-serve agent bootstrap, MCP surface)
-- Gateway: /v1/chat/completions (OpenAI-compatible model routing)
+- Gateway: /v1/chat/completions (OpenAI-compatible model routing; X-Connexa-Team for workforce teams)
+- Workforce: /api/workforce/v1/teams|skills|memories + SCIM 2.0 at /scim/v2/Users|Groups
 
 Connectors (starter tool pack): weather, wikipedia, jira, slack, notion, github, gmail, helpdesk.
 Every connector exposes authenticate_<slug> (sign-in) + <slug>__validate_credential; tools called
 without a connection return the machine-actionable reauth_required payload.
+Builtin MCP tools: memory_save, memory_search, skills_list.
 
 Agents should call the agent signup endpoint first; it returns a claim link for a human
 to take ownership of the new organization.
@@ -83,6 +89,20 @@ POST /api/{category}/v1/account-token/{public_token}
 POST /api/{category}/v1/accounts/{public_token}/sync -> on-demand idempotent sync (added/updated/unchanged + counts)
 GET/POST/PATCH /api/ticketing/v1/tickets ; /api/crm/v1/contacts ; /api/crm/v1/deals
 GET /api/ticketing/v1/meta/write-schema before writes; POST /api/ticketing/v1/passthrough for raw provider calls
+POST /api/{category}/v1/accounts/{public_token}/sync-frequency -> {"seconds": N} scheduled background sync (0 = manual)
+GET  /api/{category}/v1/issues -> open sync issues (health surface)
+DELETE /api/{category}/v1/accounts/{public_token} -> erasure: remove account + all derived rows
+Field-level scopes on a key: {"Ticket": {"exclude": [...]}} filter response fields; list endpoints accept include_remote_data=false
+
+## Workforce plane (teams / SCIM / skills / memory)
+POST /api/workforce/v1/teams {"name", "allowed_models", "monthly_credit_budget", "tool_pack_id"}
+GET  /api/workforce/v1/teams ; PATCH /api/workforce/v1/teams/{id}
+POST /api/workforce/v1/teams/{id}/members {"registered_user_id"}
+POST/GET/PATCH /api/workforce/v1/skills (shared skills library)
+POST/GET /api/workforce/v1/memories (?q= search; employee AI context)
+GET  /api/workforce/v1/issues
+SCIM 2.0: GET/POST /scim/v2/Users ; GET/POST/PATCH /scim/v2/Groups (IdP provisioning; membership = pack + allowlist + budget)
+Gateway governance: send X-Connexa-Team: <team id or name> on /v1/chat/completions; allowlist + team budget enforced; DLP scans outbound prompts
 
 ## Gateway
 GET /v1/models ; POST /v1/chat/completions (stream supported) ; POST /v1/responses
@@ -112,6 +132,7 @@ def boot() -> None:
         db.commit()
     finally:
         db.close()
+    scheduler.start_scheduler()   # background sync loop (per-account frequencies)
     # Print dev keys once per boot (dev convenience; production stores hashes only).
     if seeded and seeded.get("demo_key"):
         print("============================================================")
@@ -121,3 +142,8 @@ def boot() -> None:
         print(f"   Admin console  : /login  (admin token: dev-admin by default)")
         print("   Docs           : /docs   |  agent map: /llms.txt")
         print("============================================================")
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
+    scheduler.stop_scheduler()

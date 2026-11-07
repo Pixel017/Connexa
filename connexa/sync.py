@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .connectors.registry import registry
 from .events import emit
 from .metering import audit, usage
-from .models import Contact, Deal, LinkedAccount, Ticket
+from .models import Contact, Deal, LinkedAccount, SyncIssue, Ticket
 from .utils import iso, now, uid
 
 
@@ -109,26 +109,51 @@ def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | 
              actor: str = "api") -> dict:
     """Sync one linked account. Idempotent: re-running adds nothing new.
 
+    Honors per-account governance held in account.settings:
+      * selective_sync:      {"Ticket": false, ...} — models the customer excluded
+      * ignored_remote_ids:  remote objects to never sync (access/erasure tooling)
+
+    Every per-row failure is recorded as a SyncIssue (surfaced via /issues and
+    the console) instead of aborting the whole pull.
+
     Returns {"integration", "category", "added", "updated", "unchanged",
-             "counts": {model: n}, "synced_at"} for API and dashboard alike.
+             "counts": {model: n}, "skipped", "errors", "synced_at"}.
     """
     connector = registry.require(account.integration)
     rows = connector.generate_sample(account.category) or []
     wanted = ("ticket",) if account.category == "ticketing" else ("contact", "deal")
 
+    settings = account.settings or {}
+    selective = settings.get("selective_sync") or {}
+    ignored_ids = set(settings.get("ignored_remote_ids") or [])
+
     outcome = {"added": 0, "updated": 0, "unchanged": 0}
     counts: dict[str, int] = {}
-    synced_models: list[str] = []
+    skipped = 0
+    errors = 0
     for row in rows:
         row_type = row.get("type") or ("ticket" if "title" in row else "contact")
         if row_type not in wanted:
             continue
-        loader = _LOADER[row_type]
-        verdict = loader(db, account, row)
-        outcome[verdict] += 1
         model = {"ticket": "Ticket", "contact": "Contact", "deal": "Deal"}[row_type]
+        if selective.get(model) is False:
+            skipped += 1
+            continue
+        if str(row.get("remote_id") or "") in ignored_ids:
+            skipped += 1
+            continue
+        loader = _LOADER[row_type]
+        try:
+            verdict = loader(db, account, row)
+        except Exception as error:  # noqa: BLE001 — record and keep syncing
+            db.rollback()
+            errors += 1
+            db.add(SyncIssue(id=uid(), org_id=account.org_id, linked_account_id=account.id,
+                             model=model, severity="error",
+                             message=f"{row.get('remote_id')}: {error}"))
+            continue
+        outcome[verdict] += 1
         counts[model] = counts.get(model, 0) + 1
-        synced_models.append(model)
 
     account.last_synced_at = now()
     db.commit()
@@ -137,7 +162,8 @@ def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | 
           meta={"integration": account.integration, **counts})
     audit(db, event_type="ACCOUNT_SYNCED",
           description=(f"{account.category}/{account.integration}: "
-                       f"+{outcome['added']} ~{outcome['updated']} ={outcome['unchanged']}"),
+                       f"+{outcome['added']} ~{outcome['updated']} ={outcome['unchanged']}"
+                       + (f" ({errors} errors)" if errors else "")),
           org_id=account.org_id, actor=actor)
 
     if background is not None and (outcome["added"] or outcome["updated"]):
@@ -149,4 +175,5 @@ def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | 
     return {"integration": account.integration, "category": account.category,
             "added": outcome["added"], "updated": outcome["updated"],
             "unchanged": outcome["unchanged"], "counts": counts,
+            "skipped": skipped, "errors": errors,
             "synced_at": iso(now())}

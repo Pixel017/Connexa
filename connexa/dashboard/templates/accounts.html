@@ -26,6 +26,31 @@
         <input type="hidden" name="account_id" value="{{ a.id }}">
         <button class="small" type="submit">Sync now</button>
       </form>
+      {% if a.open_issues %}<span class="pill no">{{ a.open_issues }} issue{{ "s" if a.open_issues > 1 }}</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+<h2>Sync schedule</h2>
+<p class="muted">The background scheduler re-pulls scheduled accounts automatically (every 60s tick). 0 disables scheduling.</p>
+<table>
+  <tr><th>Integration</th><th>Frequency</th><th>Set</th></tr>
+  {% for a in accounts %}
+  <tr>
+    <td>{{ a.connector_name }}</td>
+    <td>{% if a.sync_frequency_seconds %}every {{ a.sync_frequency_seconds }}s{% else %}manual only{% endif %}</td>
+    <td>
+      <form class="inline" method="post" action="/dashboard/accounts/frequency">
+        <input type="hidden" name="account_id" value="{{ a.id }}">
+        <select name="seconds">
+          <option value="0" {% if not a.sync_frequency_seconds %}selected{% endif %}>manual</option>
+          <option value="300" {% if a.sync_frequency_seconds == 300 %}selected{% endif %}>5 min</option>
+          <option value="3600" {% if a.sync_frequency_seconds == 3600 %}selected{% endif %}>1 hour</option>
+          <option value="86400" {% if a.sync_frequency_seconds == 86400 %}selected{% endif %}>24 hours</option>
+        </select>
+        <button class="small" type="submit">Apply</button>
+      </form>
     </td>
   </tr>
   {% endfor %}

@@ -135,8 +135,13 @@ def _remaining_budget(db: Session, org) -> int:
 
 @router.post("/chat/completions")
 def chat_completions(request: ChatCompletionRequest, auth=Depends(gateway_auth),
-                     db: Session = Depends(get_db)):
+                     db: Session = Depends(get_db),
+                     x_connexa_team: str | None = Header(default=None, alias="X-Connexa-Team")):
     key, org = auth
+
+    # ---- workforce governance: team allowlist + team budget (X-Connexa-Team) ----
+    from ..workforce import enforce_team_model
+    team = enforce_team_model(db, org, x_connexa_team, request.model)
 
     remaining = _remaining_budget(db, org)
     if remaining <= 0:
@@ -144,7 +149,37 @@ def chat_completions(request: ChatCompletionRequest, auth=Depends(gateway_auth),
                                             "message": "Monthly gateway budget exhausted for this org."}})
 
     chain = _resolve_order(db, org, request.model)
+    if team is not None:
+        allowed = team.allowed_models or ["*"]
+        if "*" not in allowed:
+            chain = [model for model in chain if model.slug in allowed]
+            if not chain:
+                raise HTTPException(403, {"error": {"code": "model_not_allowed_for_team",
+                                                    "message": (f"No approved model for team '{team.name}' "
+                                                                f"in the resolved routing chain.")}})
+
+    # ---- DLP on outbound model traffic (same rule engine as agent traffic) ------
+    from ..workforce import dlp_scan_outbound
+    dlp_actions: list[dict] = []
     prompt_text = "\n".join(m.content for m in request.messages)
+    scanned_text, violations, blocked = dlp_scan_outbound(db, org, prompt_text)
+    if violations:
+        dlp_actions = violations
+    if blocked:
+        audit(db, event_type="GATEWAY_DLP_BLOCKED", org_id=org.id, actor=f"key:{key.name}",
+              description=f"{len(violations)} violation(s) blocked before model dispatch")
+        raise HTTPException(403, {"error": {"code": "dlp_blocked",
+                                            "message": "Request blocked by a data-loss-prevention rule "
+                                                       "before it reached the model.",
+                                            "violations": violations}})
+    if any(v.get("action") == "REDACT" for v in violations):
+        audit(db, event_type="GATEWAY_DLP_REDACTED", org_id=org.id, actor=f"key:{key.name}",
+              description=f"{len(violations)} match(es) redacted before model dispatch")
+        request = request.model_copy(deep=True)
+        for message in request.messages:
+            scanned_message, _, _ = dlp_scan_outbound(db, org, message.content)
+            message.content = scanned_message
+        prompt_text = scanned_text
 
     attempts: list[dict] = []
     cost_credits = 0.0
@@ -163,8 +198,10 @@ def chat_completions(request: ChatCompletionRequest, auth=Depends(gateway_auth),
     text = result["text"]
     usage_row_note = {"attempts": attempts}
     usage(db, plane="gateway", kind="llm_request", credit_type="tokens",
-          units=0, credits=cost_credits, org_id=org.id, key_id=key.id, meta=usage_row_note)
-    audit(db, event_type="GATEWAY_LLM_CALL", description=f"{result['model_served']} (-{cost_credits:g} cr)",
+          units=0, credits=cost_credits, org_id=org.id, key_id=key.id,
+          team_id=team.id if team is not None else None, meta=usage_row_note)
+    audit(db, event_type="GATEWAY_LLM_CALL", description=f"{result['model_served']} (-{cost_credits:g} cr)"
+          + (f" [team:{team.name}]" if team is not None else ""),
           org_id=org.id, actor=f"key:{key.name}")
 
     if request.stream:
@@ -180,7 +217,9 @@ def chat_completions(request: ChatCompletionRequest, auth=Depends(gateway_auth),
         "usage": {"prompt_tokens": result["input_tokens"],
                   "completion_tokens": result["output_tokens"],
                   "total_tokens": result["input_tokens"] + result["output_tokens"]},
-        "connexa": {"credits_charged": cost_credits, "attempts": attempts},
+        "connexa": {"credits_charged": cost_credits, "attempts": attempts,
+                    "team": team.name if team is not None else None,
+                    "dlp": dlp_actions},
     }
 
 

@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Workforce Governance — Connexa Console{% endblock %}
+{% block body %}
+<h1>Workforce Governance</h1>
+<p class="muted">Teams provisioned from your IdP (SCIM 2.0), each with a tool pack, a model allowlist, and a hard monthly credit budget. Skills and memory are shared context for every agent in the org.</p>
+
+{% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+
+<h2>Teams</h2>
+{% if team_rows %}
+<table>
+  <tr><th>Team</th><th>Tool pack</th><th>Model allowlist</th><th>Monthly budget</th><th>Members</th></tr>
+  {% for row in team_rows %}
+  <tr>
+    <td><strong>{{ row.team.name }}</strong></td>
+    <td>{{ row.pack or "—" }}</td>
+    <td><code>{{ row.team.allowed_models | join(", ") }}</code></td>
+    <td>{{ row.team.monthly_credit_budget ~ " cr" if row.team.monthly_credit_budget else "org budget" }}</td>
+    <td>
+      {{ row.member_count }}{% if row.members %} — {% for m in row.members[:3] %}{{ m.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if row.members|length > 3 %} +{{ row.members|length - 3 }}{% endif %}{% endif %}
+      <form class="inline" method="post" action="/dashboard/workforce/teams/{{ row.team.id }}/members">
+        <input name="origin_user_id" placeholder="user id or userName" size="22">
+        <button class="small" type="submit">Add</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">No teams yet — create one below or sync groups from your IdP via <code>POST /scim/v2/Groups</code>.</p>
+{% endif %}
+
+<div class="cards">
+  <div class="card" style="flex:1; min-width:280px;">
+    <strong>New team</strong>
+    <form method="post" action="/dashboard/workforce/teams">
+      <input name="name" placeholder="team name" required><br>
+      <select name="tool_pack_id">
+        <option value="">no tool pack</option>
+        {% for p in packs %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      </select><br>
+      <input name="allowed_models" placeholder='allowed models, comma-sep (blank = all)'><br>
+      <input name="monthly_credit_budget" type="number" min="0" placeholder="monthly credit budget (0 = org budget)"><br>
+      <button type="submit">Create team</button>
+    </form>
+  </div>
+  <div class="card" style="flex:1; min-width:280px;">
+    <strong>Publish a skill</strong>
+    <form method="post" action="/dashboard/workforce/skills">
+      <input name="name" placeholder="skill name" required><br>
+      <textarea name="instructions" rows="3" placeholder="step-by-step playbook the agent should follow" required></textarea><br>
+      <input name="tags" placeholder="tags, comma-sep"><br>
+      <button type="submit">Publish</button>
+    </form>
+  </div>
+  <div class="card" style="flex:1; min-width:280px;">
+    <strong>Save a memory</strong>
+    <form method="post" action="/dashboard/workforce/memories">
+      <textarea name="content" rows="3" placeholder="e.g. Escalations for Acme go to Dana on-call" required></textarea><br>
+      <input name="tags" placeholder="tags, comma-sep"><br>
+      <button type="submit">Save</button>
+    </form>
+  </div>
+</div>
+
+<h2>Skills library</h2>
+{% if skills %}
+<table>
+  <tr><th>Skill</th><th>Version</th><th>Tags</th><th>Instructions</th></tr>
+  {% for s in skills %}
+  <tr>
+    <td><strong>{{ s.name }}</strong></td>
+    <td>v{{ s.version }}</td>
+    <td>{{ s.tags | join(", ") or "—" }}</td>
+    <td>{{ s.instructions[:110] }}{{ "…" if s.instructions|length > 110 }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">Empty — agents see whatever you publish here via the <code>skills_list</code> MCP tool.</p>{% endif %}
+
+<h2>Employee AI context (latest memories)</h2>
+{% if memories %}
+<table>
+  <tr><th>When</th><th>Author</th><th>Tags</th><th>Content</th></tr>
+  {% for m in memories %}
+  <tr><td>{{ iso(m.created_at) }}</td><td>{{ m.author }}</td><td>{{ m.tags | join(", ") or "—" }}</td><td>{{ m.content }}</td></tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">No memories yet — agents can save them with the <code>memory_save</code> MCP tool.</p>{% endif %}
+
+<h2>IdP provisioning (SCIM 2.0)</h2>
+<p class="muted">Point Okta / Entra at <code>/scim/v2</code> with a bearer data key. Directory users land as
+registered users; groups land as teams (membership = tool pack + allowlist + budget). Group create accepts
+<code>connexa_extensions</code> to attach governance in one call:</p>
+<div class="code">POST /scim/v2/Groups
+{"displayName": "Support", "externalId": "okta-123", "members": [{"value": "scim-user-id"}],
+ "connexa_extensions": {"allowed_models": ["connexa-echo"], "monthly_credit_budget": 500}}</div>
+{% endblock %}

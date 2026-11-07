@@ -13,8 +13,9 @@ from ..config import settings
 from ..connectors.registry import registry
 from ..db import get_db
 from ..models import (ApiKey, AuditEntry, Budget, GatewayModel, LinkToken, LinkedAccount,
-                      Org, RegisteredUser, RoutingPolicy, SecurityRule, Ticket, Contact, Deal,
-                      ToolAccessRequest, ToolPack, UsageLog, WebhookDelivery, WebhookEndpoint)
+                      Org, RegisteredUser, RoutingPolicy, SecurityRule, Skill, SyncIssue,
+                      TeamMembership, Ticket, Contact, Deal, ToolAccessRequest, ToolPack,
+                      UsageLog, WebhookDelivery, WebhookEndpoint, WorkforceMemory, WorkforceTeam)
 from ..security import admin_cookie_ok, create_api_key
 from ..metering import audit
 from ..utils import iso, uid, new_token
@@ -164,9 +165,32 @@ def accounts_page(request: Request, db: Session = Depends(get_db), flash: str = 
         account.tickets_n = db.query(Ticket).filter(Ticket.linked_account_id == account.id).count()
         account.contacts_n = db.query(Contact).filter(Contact.linked_account_id == account.id).count()
         account.deals_n = db.query(Deal).filter(Deal.linked_account_id == account.id).count()
+        account.open_issues = (db.query(SyncIssue)
+                               .filter(SyncIssue.linked_account_id == account.id, SyncIssue.resolved == False)  # noqa: E712
+                               .count())
         connector = registry.get(account.integration)
         account.connector_name = connector.name if connector else account.integration
     return page(request, "accounts.html", {"org": org, "accounts": accounts, "iso": iso, "flash": flash})
+
+
+@router.post("/dashboard/accounts/frequency")
+async def accounts_frequency(request: Request, db: Session = Depends(get_db),
+                             account_id: str = Form(...), seconds: int = Form(...)):
+    org = require_admin(request, db)
+    account = (db.query(LinkedAccount)
+               .filter(LinkedAccount.id == account_id, LinkedAccount.org_id == org.id).first())
+    if account:
+        seconds = max(0, min(int(seconds), 86_400 * 7))
+        account.sync_frequency_seconds = seconds
+        db.commit()
+        audit(db, event_type="SYNC_SCHEDULE_SET", org_id=org.id, actor="dashboard",
+              description=(f"{account.integration}: every {seconds}s" if seconds
+                           else f"{account.integration}: manual only"))
+        flash = (f"Scheduled {account.integration}: every {seconds}s" if seconds
+                 else f"{account.integration}: scheduled sync off")
+    else:
+        flash = "Unknown linked account."
+    return RedirectResponse(f"/dashboard/accounts?flash={quote(flash)}", status_code=303)
 
 
 @router.post("/dashboard/accounts/sync")
@@ -194,6 +218,99 @@ def audit_page(request: Request, db: Session = Depends(get_db)):
     rows = db.query(AuditEntry).order_by(AuditEntry.ts.desc()).limit(100).all()
     total = db.query(AuditEntry).count()
     return page(request, "audit.html", {"org": org, "rows": rows, "total": total, "iso": iso})
+
+
+# ---------------------------------------------------------------- workforce governance
+
+@router.get("/dashboard/workforce", response_class=HTMLResponse)
+def workforce_page(request: Request, db: Session = Depends(get_db), flash: str = ""):
+    if not admin_cookie_ok(request):
+        return RedirectResponse("/login", status_code=303)
+    org = require_admin(request, db)
+    teams = db.query(WorkforceTeam).filter(WorkforceTeam.org_id == org.id).order_by(WorkforceTeam.name).all()
+    team_rows = []
+    for team in teams:
+        memberships = db.query(TeamMembership).filter(TeamMembership.team_id == team.id).all()
+        members = []
+        for membership in memberships:
+            user = db.query(RegisteredUser).filter(RegisteredUser.id == membership.registered_user_id).first()
+            members.append({"id": membership.registered_user_id,
+                            "name": user.origin_user_name if user else membership.registered_user_id,
+                            "active": bool(user.active) if user else True})
+        pack = db.query(ToolPack).filter(ToolPack.id == team.tool_pack_id).first() if team.tool_pack_id else None
+        team_rows.append({"team": team, "members": members,
+                          "pack": pack.name if pack else None,
+                          "member_count": len(members)})
+    skills = db.query(Skill).filter(Skill.org_id == org.id).order_by(Skill.name).all()
+    memories = (db.query(WorkforceMemory).filter(WorkforceMemory.org_id == org.id)
+                .order_by(WorkforceMemory.created_at.desc()).limit(15).all())
+    users = db.query(RegisteredUser).filter(RegisteredUser.agent_org_id == org.id).all()
+    packs = db.query(ToolPack).filter(ToolPack.agent_org_id == org.id).all()
+    return page(request, "workforce.html", {"org": org, "team_rows": team_rows, "skills": skills,
+                                            "memories": memories, "users": users, "packs": packs,
+                                            "iso": iso, "flash": flash})
+
+
+@router.post("/dashboard/workforce/teams")
+async def create_team_form(request: Request, db: Session = Depends(get_db), name: str = Form(...),
+                           tool_pack_id: str = Form(""), allowed_models: str = Form(""),
+                           monthly_credit_budget: int = Form(0)):
+    org = require_admin(request, db)
+    allowlist = [m.strip() for m in (allowed_models or "").split(",") if m.strip()] or ["*"]
+    team = WorkforceTeam(id=uid(), org_id=org.id, name=name.strip() or "team",
+                         tool_pack_id=tool_pack_id or None,
+                         allowed_models=allowlist,
+                         monthly_credit_budget=monthly_credit_budget or None)
+    db.add(team)
+    db.commit()
+    audit(db, event_type="TEAM_CREATED", description=team.name, org_id=org.id, actor="dashboard")
+    return RedirectResponse("/dashboard/workforce", status_code=303)
+
+
+@router.post("/dashboard/workforce/teams/{team_id}/members")
+async def add_member_form(request: Request, team_id: str, db: Session = Depends(get_db),
+                          origin_user_id: str = Form(...)):
+    org = require_admin(request, db)
+    user = (db.query(RegisteredUser)
+            .filter(RegisteredUser.agent_org_id == org.id,
+                    (RegisteredUser.id == origin_user_id) | (RegisteredUser.origin_user_id == origin_user_id))
+            .first())
+    team = db.query(WorkforceTeam).filter(WorkforceTeam.id == team_id, WorkforceTeam.org_id == org.id).first()
+    if user and team:
+        exists = (db.query(TeamMembership)
+                  .filter(TeamMembership.team_id == team.id,
+                          TeamMembership.registered_user_id == user.id).first())
+        if not exists:
+            db.add(TeamMembership(id=uid(), team_id=team.id, registered_user_id=user.id))
+            db.commit()
+            audit(db, event_type="TEAM_MEMBER_ADDED", description=f"{team.name} <- {user.origin_user_name}",
+                  org_id=org.id, actor="dashboard")
+    return RedirectResponse("/dashboard/workforce", status_code=303)
+
+
+@router.post("/dashboard/workforce/skills")
+async def create_skill_form(request: Request, db: Session = Depends(get_db), name: str = Form(...),
+                            instructions: str = Form(...), tags: str = Form("")):
+    org = require_admin(request, db)
+    skill = Skill(id=uid(), org_id=org.id, name=name.strip() or "skill",
+                  instructions=instructions,
+                  tags=[t.strip() for t in (tags or "").split(",") if t.strip()])
+    db.add(skill)
+    db.commit()
+    audit(db, event_type="SKILL_PUBLISHED", description=skill.name, org_id=org.id, actor="dashboard")
+    return RedirectResponse("/dashboard/workforce", status_code=303)
+
+
+@router.post("/dashboard/workforce/memories")
+async def create_memory_form(request: Request, db: Session = Depends(get_db), content: str = Form(...),
+                             tags: str = Form("")):
+    org = require_admin(request, db)
+    memory = WorkforceMemory(id=uid(), org_id=org.id, author="dashboard", content=content.strip(),
+                             tags=[t.strip() for t in (tags or "").split(",") if t.strip()])
+    db.add(memory)
+    db.commit()
+    audit(db, event_type="MEMORY_SAVED", description=memory.content[:80], org_id=org.id, actor="dashboard")
+    return RedirectResponse("/dashboard/workforce", status_code=303)
 
 # ---------------------------------------------------------------- webhooks
 

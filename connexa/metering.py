@@ -22,12 +22,12 @@ def audit(db: Session, *, event_type: str, description: str | None = None, actor
 
 def usage(db: Session, *, plane: str, kind: str, units: float = 0.0, credit_type: str | None = None,
           credits: float | None = None, org_id: str | None = None, agent_org_id: str | None = None,
-          key_id: str | None = None, meta: dict | None = None) -> float:
+          key_id: str | None = None, team_id: str | None = None, meta: dict | None = None) -> float:
     if credits is None:
         credits = round(units * CREDIT_WEIGHTS.get(credit_type or "low", 1.0), 4)
     db.add(UsageLog(id=uid(), plane=plane, kind=kind, units=units, credit_type=credit_type,
                     credits=credits, org_id=org_id, agent_org_id=agent_org_id, key_id=key_id,
-                    meta=meta or {}))
+                    team_id=team_id, meta=meta or {}))
     db.commit()
     return credits
 

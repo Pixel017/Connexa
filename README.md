@@ -88,6 +88,9 @@ Key endpoints:
 | `POST /api/ticketing/v1/passthrough` | escape hatch: raw method/path to the provider's own API |
 | `POST /api/{cat}/v1/account-token/{public_token}` | exchange public token for account token |
 | `POST /api/{cat}/v1/accounts/{public_token}/sync` | **on-demand sync**: pulls provider payloads into Common Model rows — idempotent, diff-aware (`added`/`updated`/`unchanged`), fires `LinkedAccount.synced` |
+| `POST /api/{cat}/v1/accounts/{public_token}/sync-frequency` | **scheduled background sync** per account (0 = manual) |
+| `GET  /api/{cat}/v1/issues` | open sync issues (health surface) |
+| `DELETE /api/{cat}/v1/accounts/{public_token}` | **erasure**: removes the account and every derived row |
 | `GET  /api/linked-accounts` | inventory of connected accounts |
 
 Categories today: **ticketing** (`Ticket`) and **crm** (`Contact`, `Deal`). Writes are validated against the Common Model — wrong enum values get a 400 with the allowed choices in the body.
@@ -170,7 +173,45 @@ expected = hmac.new(secret.encode(), await request.body(), hashlib.sha256).hexdi
 assert hmac.compare_digest(expected, signature.removeprefix("sha256="))
 ```
 
-Events fire on link (`LinkedAccount.linked`), writes (`Ticket.synced`, `Contact.synced`, `Deal.synced`), plus `Test.connected` from the console. Endpoints + delivery receipts (status codes) are managed in **Console → Webhooks**.
+Events fire on link (`LinkedAccount.linked`), writes (`Ticket.synced`, `Contact.synced`, `Deal.synced`), sync diffs (`LinkedAccount.synced`), plus `Test.connected` from the console. Endpoints + delivery receipts (status codes) are managed in **Console → Webhooks**.
+
+---
+
+## Workforce governance (IdP / teams / skills / memory / DLP)
+
+Point your IdP at **SCIM 2.0** (`/scim/v2/Users`, `/scim/v2/Groups`) with a bearer data key. Directory
+users land as registered users; groups become **teams**. Membership in a team is what grants governance:
+
+```bash
+curl -X POST localhost:8000/scim/v2/Groups -H "Authorization: Bearer $DATA_KEY" -d '{
+  "displayName": "Support", "externalId": "okta-123",
+  "members": [{"value": "<scim-user-id>"}],
+  "connexa_extensions": {"allowed_models": ["connexa-echo"], "monthly_credit_budget": 500}}'
+```
+
+Then the gateway **enforces** it on every call that presents the team header:
+
+```bash
+curl -X POST localhost:8000/v1/chat/completions -H "Authorization: Bearer $GATEWAY_KEY" \
+  -H "X-Connexa-Team: Support" -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+# -> 403 model_not_allowed_for_team (echo is approved; gpt-4o-mini is not)
+```
+
+- **Per-team model allowlists** — unapproved models are refused; routing-policy failover chains are filtered to approved models only
+- **Hard per-team budgets** — 402 `team_budget_exceeded` once a team's monthly credits are spent (checked before invocation, not merely logged)
+- **DLP on outbound model traffic** — prompts are scanned with the same rule engine as agent tool traffic: REDACT rewrites before the model sees them, BLOCK refuses the request (403), every action audited
+- **Shared skills library** — versioned playbooks at `/api/workforce/v1/skills`; every agent sees them via the `skills_list` MCP tool
+- **Employee AI memory** — org-scoped context at `/api/workforce/v1/memories` (searchable); agents read/write via `memory_save` / `memory_search` MCP tools
+- **IdP deprovisioning** — SCIM `replace active:false` deactivates the user everywhere
+- Full teams/skills/memories management in **Console → Workforce**
+
+### Data-plane governance (the Unified extras)
+
+- **Scheduled background sync** — set per-account frequency (`POST .../accounts/{token}/sync-frequency` or Console → Linked Accounts); a boot-time asyncio loop re-pulls due accounts with the same sync engine
+- **Selective sync + ignored remote objects** — `account.settings = {"selective_sync": {"Deal": false}, "ignored_remote_ids": [...]}` — excluded models/objects are never loaded
+- **Field-level scopes** — a key's `field_scopes` (`{"Contact": {"exclude": ["email"]}}`) filter response fields (data minimization); list endpoints also accept `include_remote_data=false`
+- **Issues surface** — `GET /api/{cat}/v1/issues` lists open sync issues; per-row sync errors are recorded, never silent
+- **Erasure** — `DELETE /api/{cat}/v1/accounts/{token}` removes the account and every derived row (end-user deletion requests)
 
 ---
 
@@ -301,5 +342,6 @@ Original code throughout — the platform reimplements *architectural patterns* 
 
 - Grow the live connector set (Calendar, Drive, HubSpot, Jira, Stripe …) — mostly `RestCall` declarations now that the SDK exists
 - More categories (HRIS, File Storage) — add a Common Model + adapters
-- Per-registered-user credential vault + per-tool pack budget envelopes
+- Per-registered-user credential vault; prebuilt Okta / Entra SCIM connectors
 - Webhook retries with backoff; cross-process job queue
+- Response-side DLP scanning (request-side is live); console multi-user RBAC
