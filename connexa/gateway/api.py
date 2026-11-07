@@ -196,6 +196,15 @@ def chat_completions(request: ChatCompletionRequest, auth=Depends(gateway_auth),
         raise HTTPException(502, {"error": {"code": "all_providers_failed", "attempts": attempts}})
 
     text = result["text"]
+
+    # ---- DLP on the response side too: nothing leaves the gateway unscanned -----
+    response_text, response_violations, _blocked = dlp_scan_outbound(db, org, text)
+    if response_violations:
+        text = response_text
+        dlp_actions.extend(response_violations)
+        audit(db, event_type="GATEWAY_DLP_RESPONSE_REDACTED", org_id=org.id, actor=f"key:{key.name}",
+              description=f"{len(response_violations)} match(es) redacted from model output")
+
     usage_row_note = {"attempts": attempts}
     usage(db, plane="gateway", kind="llm_request", credit_type="tokens",
           units=0, credits=cost_credits, org_id=org.id, key_id=key.id,

@@ -20,12 +20,15 @@
 </table>
 
 <h2>Recent deliveries</h2>
+<p class="muted">Failed deliveries retry with exponential backoff (30s → 2m → 10m, 4 attempts total).</p>
 <table>
-  <tr><th>When</th><th>Event</th><th>Result</th></tr>
+  <tr><th>When</th><th>Event</th><th>Result</th><th>Attempts</th><th>Next retry</th></tr>
   {% for d in deliveries %}
   <tr><td class="muted">{{ iso(d.created_at) }}</td><td><code>{{ d.event }}</code></td>
       <td>{% if d.ok %}<span class="pill ok">HTTP {{ d.status_code }}</span>
-          {% else %}<span class="pill no">{{ ("HTTP " ~ d.status_code) if d.status_code else "pending/failed" }}</span>{% endif %}</td></tr>
-  {% else %}<tr><td colspan="3" class="muted">No deliveries yet. Add an endpoint, manage linked accounts, and events will flow (or create an agent org).</td></tr>{% endfor %}
+          {% else %}<span class="pill no">{{ ("HTTP " ~ d.status_code) if d.status_code else "pending/failed" }}</span>{% endif %}</td>
+      <td>{{ d.attempts }}/4</td>
+      <td class="muted">{% if not d.ok and d.next_attempt_at and d.attempts < 4 %}{{ iso(d.next_attempt_at) }}{% elif not d.ok %}exhausted{% else %}—{% endif %}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">No deliveries yet. Add an endpoint, manage linked accounts, and events will flow (or create an agent org).</td></tr>{% endfor %}
 </table>
 {% endblock %}

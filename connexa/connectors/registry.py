@@ -8,7 +8,9 @@ from .real_slack import SlackConnector
 from .real_notion import NotionConnector
 from .real_gmail import GmailConnector
 from .real_github import GitHubConnector
-from .simulated import JiraToolsConnector, HubSpotLikeConnector, HelpdeskLikeConnector, SalespodLikeConnector
+from .simulated import (JiraToolsConnector, HubSpotLikeConnector, HelpdeskLikeConnector,
+                        SalespodLikeConnector, PeopleOsConnector, LedgerlyConnector)
+from ..common_models import DATA_CATEGORIES
 
 
 class ConnectorRegistry:
@@ -21,6 +23,8 @@ class ConnectorRegistry:
             HubSpotLikeConnector(),
             HelpdeskLikeConnector(),
             SalespodLikeConnector(),
+            PeopleOsConnector(),
+            LedgerlyConnector(),
             SlackConnector(settings.slack_token, settings.slack_oauth),
             NotionConnector(settings.notion_token, settings.notion_oauth),
             GmailConnector(settings.gmail_token, settings.gmail_oauth),
@@ -49,7 +53,7 @@ class ConnectorRegistry:
     # --- data-plane providers (connectors that can back a LinkedAccount) --------
     def data_plane_providers(self, category: str) -> list[Connector]:
         return [c for c in self._by_slug.values()
-                if category in ("ticketing", "crm") and c.generate_sample(category)]
+                if category in DATA_CATEGORIES and c.generate_sample(category)]
 
 
 registry = ConnectorRegistry()

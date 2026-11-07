@@ -10,7 +10,7 @@ import tempfile
 _TEST_DB = os.path.join(tempfile.gettempdir(), "connexa-smoke.db")
 try:
     if os.path.exists(_TEST_DB):
-        os.remove(_TEST_DB)          # a previous run's lock may linger on Windows — reuse then
+        os.remove(_TEST_DB)          # a previous run's lock may linger on Windows â€” reuse then
 except PermissionError:
     pass
 os.environ["CONNEXA_DB"] = _TEST_DB
@@ -131,7 +131,7 @@ def test_sync_engine_idempotent_restores_rows(client):
     first = sync()
     assert first["integration"] == "helpdesk" and first["unchanged"] >= 1
 
-    # wipe the normalized rows — the sync must restore them (not just the first run)
+    # wipe the normalized rows â€” the sync must restore them (not just the first run)
     db = SessionLocal()
     try:
         account = db.query(LinkedAccount).filter(LinkedAccount.account_token == public_token).first()
@@ -317,7 +317,7 @@ def test_dlp_on_outbound_model_traffic(client):
 
 
 def test_scheduled_sync_tick(client):
-    """The background scheduler syncs accounts whose frequency elapsed — and only those."""
+    """The background scheduler syncs accounts whose frequency elapsed â€” and only those."""
     from datetime import timedelta
 
     from connexa.db import SessionLocal
@@ -423,3 +423,201 @@ def test_selective_sync_field_scopes_issues_erasure(client):
     assert erased.status_code == 200 and erased.json()["erased"] is True
     after = client.get("/api/crm/v1/contacts", headers={**headers, "X-Account-Token": public_token})
     assert after.status_code == 404, "account token must die with the account"
+
+
+# ---------------------------------------------------------------- v0.4: categories + mappings + retries
+
+def test_hris_and_accounting_categories(client):
+    """New categories: link -> initial sync -> list/get/create on Employee and Invoice."""
+    headers = {"Authorization": f"Bearer {_workforce_key(client)}"}
+
+    token = client.post("/api/link-tokens", json={"categories": ["hris", "accounting"]},
+                        headers=headers).json()["link_token"]
+    pt_hris = client.post(f"/link/{token}/connect",
+                          json={"integration": "peopleos", "end_user_name": "HR"}).json()["public_token"]
+    token2 = client.post("/api/link-tokens", json={"categories": ["accounting"]},
+                         headers=headers).json()["link_token"]
+    pt_acc = client.post(f"/link/{token2}/connect",
+                         json={"integration": "ledgerly", "end_user_name": "Fin"}).json()["public_token"]
+
+    employees = client.get("/api/hris/v1/employees", headers={**headers, "X-Account-Token": pt_hris}).json()
+    assert employees["count"] >= 5 and employees["results"][0]["first_name"]
+    emp_id = employees["results"][0]["id"]
+    one = client.get(f"/api/hris/v1/employees/{emp_id}",
+                     headers={**headers, "X-Account-Token": pt_hris}).json()
+    assert one["id"] == emp_id
+
+    created = client.post("/api/hris/v1/employees", headers={**headers, "X-Account-Token": pt_hris},
+                          json={"first_name": "Ana", "last_name": "Moreno",
+                                "email": "ana@acme.example", "employment_type": "contractor"})
+    assert created.status_code == 201 and created.json()["employment_type"] == "contractor"
+
+    bad = client.post("/api/hris/v1/employees", headers={**headers, "X-Account-Token": pt_hris},
+                      json={"first_name": "Ana", "employment_type": "gig"})
+    assert bad.status_code == 400, "enum values validated on write"
+
+    invoices = client.get("/api/accounting/v1/invoices",
+                          headers={**headers, "X-Account-Token": pt_acc}).json()
+    assert invoices["count"] >= 5
+    created_inv = client.post("/api/accounting/v1/invoices",
+                              headers={**headers, "X-Account-Token": pt_acc},
+                              json={"vendor_name": "Acme Supplies", "total_amount": 99.5,
+                                    "status": "submitted"})
+    assert created_inv.status_code == 201 and created_inv.json()["vendor_name"] == "Acme Supplies"
+
+    schema = client.get("/api/accounting/v1/meta/write-schema", headers=headers).json()
+    assert schema["Invoice"]["fields"]["status"]["values"][0] == "draft"
+
+
+def test_field_mappings_engine_and_suggestions(client):
+    """Provider fields (team/manager/vendor/total) map onto Common Model fields; the
+    sync engine applies mappings and re-syncs; suggestions surface unmapped fields."""
+    headers = {"Authorization": f"Bearer {_workforce_key(client)}"}
+
+    token = client.post("/api/link-tokens", json={"categories": ["hris"]},
+                        headers=headers).json()["link_token"]
+    pt = client.post(f"/link/{token}/connect",
+                     json={"integration": "peopleos", "end_user_name": "HR"}).json()["public_token"]
+
+    # before mappings: provider's 'team' never lands in department (stays in remote_data)
+    before = client.get("/api/hris/v1/employees", headers={**headers, "X-Account-Token": pt}).json()
+    assert before["count"] >= 5
+    assert all(r["department"] is None for r in before["results"])
+
+    # suggestions: 'team' is an unmapped provider field observed in payloads
+    suggestions = client.get(f"/api/hris/v1/accounts/{pt}/field-mappings/suggestions",
+                             headers=headers).json()
+    assert "team" in suggestions["suggestions"]["Employee"]["unmapped_provider_fields"]
+
+    # set mappings -> engine re-syncs -> department populated from provider 'team'
+    mapped = client.put(f"/api/hris/v1/accounts/{pt}/field-mappings", headers=headers, json={
+        "mappings": {"Employee": {"team": "department", "manager": "manager_name"}}})
+    assert mapped.status_code == 200
+    assert mapped.json()["reapplied_sync"]["updated"] >= 1
+
+    after = client.get("/api/hris/v1/employees", headers={**headers, "X-Account-Token": pt}).json()
+    departments = {r["department"] for r in after["results"]}
+    assert "Engineering" in departments and "Finance" in departments
+    managers = {r["manager_name"] for r in after["results"]}
+    assert "Priya Nair" in managers
+
+    # invalid target rejected
+    invalid = client.put(f"/api/hris/v1/accounts/{pt}/field-mappings", headers=headers, json={
+        "mappings": {"Employee": {"team": "nope_field"}}})
+    assert invalid.status_code == 400
+
+    # same engine on accounting: vendor -> vendor_name, total -> total_amount
+    token2 = client.post("/api/link-tokens", json={"categories": ["accounting"]},
+                         headers=headers).json()["link_token"]
+    pt2 = client.post(f"/link/{token2}/connect",
+                      json={"integration": "ledgerly", "end_user_name": "Fin"}).json()["public_token"]
+    client.put(f"/api/accounting/v1/accounts/{pt2}/field-mappings", headers=headers, json={
+        "mappings": {"Invoice": {"vendor": "vendor_name", "total": "total_amount",
+                                 "issued": "issue_date", "due": "due_date"}}})
+    inv = client.get("/api/accounting/v1/invoices", headers={**headers, "X-Account-Token": pt2}).json()
+    vendors = {r["vendor_name"] for r in inv["results"]}
+    assert "Northwind Ltd" in vendors
+    totals = [r["total_amount"] for r in inv["results"]]
+    assert any(t and t > 0 for t in totals)
+
+
+def test_webhook_retries_with_backoff(client):
+    """A dead endpoint's deliveries retry with growing backoff and go dead (no next
+    retry scheduled) after the final attempt."""
+    from datetime import timedelta
+
+    from connexa.db import SessionLocal
+    from connexa.events import MAX_ATTEMPTS, attempt_delivery, due_retries, emit
+    from connexa.models import ApiKey, WebhookDelivery, WebhookEndpoint
+    from connexa.utils import naive_now as _now
+    from connexa.utils import uid as _uid
+
+    headers = {"Authorization": f"Bearer {_workforce_key(client)}"}
+    db = SessionLocal()
+    try:
+        org = (db.query(ApiKey).filter(ApiKey.scope == "data").first()).org_id
+        endpoint = WebhookEndpoint(id=_uid(), org_id=org, url="http://127.0.0.1:1/hook",
+                                   secret="whsec_test", events=["*"])
+        db.add(endpoint)
+        db.commit()
+
+        class _FakeBG:
+            def add_task(self, fn, *args):
+                pass                      # do not deliver inline; drive attempts manually
+
+        emit(db, _FakeBG(), event="LinkedAccount.linked", org_id=org, payload_data={"n": 1})
+        delivery = (db.query(WebhookDelivery).filter(WebhookDelivery.endpoint_id == endpoint.id)
+                    .order_by(WebhookDelivery.created_at.desc()).first())
+        assert delivery.attempts == 0 and delivery.next_attempt_at is not None
+        delivery_id = delivery.id
+    finally:
+        db.close()
+
+    # attempt 1 fails (connection refused) -> backoff scheduled
+    assert attempt_delivery(delivery_id) is False
+    db = SessionLocal()
+    try:
+        for expected_attempts in range(2, MAX_ATTEMPTS + 1):
+            d = db.get(WebhookDelivery, delivery_id)
+            assert d.attempts == expected_attempts - 1
+            d.next_attempt_at = _now() - timedelta(seconds=1)   # force backoff to elapse
+            db.commit()
+            assert any(x.id == delivery_id for x in due_retries(db))
+            assert attempt_delivery(delivery_id) is False
+            db.expire_all()
+        d = db.get(WebhookDelivery, delivery_id)
+        assert d.attempts == MAX_ATTEMPTS
+        assert d.next_attempt_at is None, "dead after MAX_ATTEMPTS"
+        assert all(x.id != delivery_id for x in due_retries(db))
+    finally:
+        db.close()
+
+
+def test_response_side_dlp_redacts_model_output(client):
+    """The echo model repeats the prompt; response-side DLP must redact the email
+    before the completion reaches the caller."""
+    from connexa.db import SessionLocal
+    from connexa.models import ApiKey, SecurityRule
+    from connexa.utils import uid as _uid
+
+    db = SessionLocal()
+    try:
+        org_id = db.query(ApiKey).filter(ApiKey.scope == "gateway").first().org_id
+        db.add(SecurityRule(id=_uid(), agent_org_id=org_id, entity_type="EMAIL",
+                            name="emails-out", pattern=r"[\w.+-]+@[\w-]+\.[\w.]+", action="REDACT",
+                            scope="org", is_active=True))
+        db.commit()
+    finally:
+        db.close()
+
+    sent = client.post("/v1/chat/completions",
+                       headers={"Authorization": f"Bearer {_gateway_key(client)}"},
+                       json={"model": "connexa-echo",
+                             "messages": [{"role": "user", "content": "ping ciso@acme.example"}]})
+    assert sent.status_code == 200
+    body = sent.json()
+    content = body["choices"][0]["message"]["content"]
+    assert "ciso@acme.example" not in content, "model output must be redacted before leaving the gateway"
+    assert "[REDACTED_EMAIL]" in content
+
+
+def test_link_flow_customization(client):
+    """Link tokens carry theming; the end-user connect page renders it."""
+    headers = {"Authorization": f"Bearer {_workforce_key(client)}"}
+    created = client.post("/api/link-tokens", headers=headers, json={
+        "categories": ["hris"], "company_name": "Acme Corp", "accent_color": "#00a854",
+        "logo_url": "https://acme.example/logo.png", "welcome_text": "Acme needs ERP access."})
+    assert created.status_code == 200
+    body = created.json()
+    assert body["customize"]["company_name"] == "Acme Corp"
+
+    page_html = client.get(f"/link/{body['link_token']}")
+    assert page_html.status_code == 200
+    text = page_html.text
+    assert "#00a854" in text and "Acme Corp" in text and "Acme needs ERP access." in text
+    assert "https://acme.example/logo.png" in text
+
+    bad = client.post("/api/link-tokens", headers=headers, json={"accent_color": "green"})
+    assert bad.status_code == 400, "accent_color must be #RRGGBB"
+
+

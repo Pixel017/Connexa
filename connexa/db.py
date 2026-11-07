@@ -35,6 +35,16 @@ _NEW_COLUMNS = {
         ("sync_frequency_seconds", "INTEGER NOT NULL DEFAULT 0"),
         ("settings", "JSON NOT NULL DEFAULT '{}'"),
     ],
+    "link_tokens": [
+        ("company_name", "VARCHAR(120)"),
+        ("logo_url", "VARCHAR(400)"),
+        ("accent_color", "VARCHAR(9)"),
+        ("welcome_text", "VARCHAR(300)"),
+    ],
+    "webhook_deliveries": [
+        ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_attempt_at", "DATETIME"),
+    ],
     "api_keys": [
         ("field_scopes", "JSON"),
     ],

@@ -60,7 +60,8 @@ Connexa is a self-contained business connectivity platform. Five planes in one p
 
 - llms-full.txt for machine-readable endpoint docs
 - /docs for the OpenAPI UI
-- Data plane: /api/{ticketing,crm}/v1/... with Bearer data key + X-Account-Token
+- Data plane: /api/{ticketing,crm,hris,accounting}/v1/... with Bearer data key + X-Account-Token
+  (Common Models: Ticket | Contact, Deal | Employee | Invoice)
 - Link flow: POST /api/link-tokens (connect a linked account via the browser)
 - Agent Handler: POST /api/v1/agent/signup/ (self-serve agent bootstrap, MCP surface)
 - Gateway: /v1/chat/completions (OpenAI-compatible model routing; X-Connexa-Team for workforce teams)
@@ -93,6 +94,10 @@ POST /api/{category}/v1/accounts/{public_token}/sync-frequency -> {"seconds": N}
 GET  /api/{category}/v1/issues -> open sync issues (health surface)
 DELETE /api/{category}/v1/accounts/{public_token} -> erasure: remove account + all derived rows
 Field-level scopes on a key: {"Ticket": {"exclude": [...]}} filter response fields; list endpoints accept include_remote_data=false
+Field mappings: GET/PUT /api/{category}/v1/accounts/{public_token}/field-mappings -> {model: {remote_field: common_field}}
+  (applied by the sync engine, then re-synced; GET .../field-mappings/suggestions lists unmapped provider fields)
+Webhook deliveries retry with exponential backoff (30s/2m/10m, 4 attempts) — failures are never silent
+Link flow customization: create link tokens with company_name, logo_url, accent_color, welcome_text
 
 ## Workforce plane (teams / SCIM / skills / memory)
 POST /api/workforce/v1/teams {"name", "allowed_models", "monthly_credit_budget", "tool_pack_id"}

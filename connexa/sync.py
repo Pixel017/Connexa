@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .connectors.registry import registry
 from .events import emit
 from .metering import audit, usage
-from .models import Contact, Deal, LinkedAccount, SyncIssue, Ticket
+from .models import Contact, Deal, Employee, Invoice, LinkedAccount, SyncIssue, Ticket
 from .utils import iso, now, uid
 
 
@@ -79,6 +79,55 @@ def _upsert_contact(db: Session, account: LinkedAccount, row: dict) -> str:
     return "updated" if changed else "unchanged"
 
 
+def _upsert_employee(db: Session, account: LinkedAccount, row: dict) -> str:
+    remote_id = str(row.get("remote_id") or "EMP-0")
+    remote_extra = _remote_extra(account, row)
+    data = dict(
+        first_name=row.get("first_name"),
+        last_name=row.get("last_name"),
+        email=row.get("email"),
+        department=row.get("department"),
+        position=row.get("position"),
+        manager_name=row.get("manager_name") or row.get("manager"),
+        employment_type=row.get("employment_type"),
+    )
+    existing = (db.query(Employee)
+                .filter(Employee.linked_account_id == account.id, Employee.remote_id == remote_id)
+                .one_or_none())
+    if existing is None:
+        db.add(Employee(id=uid(), linked_account_id=account.id, remote_id=remote_id,
+                        remote_extra=remote_extra, **data))
+        return "added"
+    changed = _apply(existing, data)
+    existing.remote_extra = remote_extra
+    return "updated" if changed else "unchanged"
+
+
+def _upsert_invoice(db: Session, account: LinkedAccount, row: dict) -> str:
+    remote_id = str(row.get("remote_id") or "INV-0")
+    remote_extra = _remote_extra(account, row)
+    data = dict(
+        invoice_number=row.get("invoice_number"),
+        status=row.get("status") or "draft",
+        vendor_name=row.get("vendor_name") or row.get("vendor"),
+        total_amount=row.get("total_amount") if row.get("total_amount") is not None else row.get("total"),
+        currency=row.get("currency") or "USD",
+        issue_date=row.get("issue_date") or row.get("issued"),
+        due_date=row.get("due_date") or row.get("due"),
+        memo=row.get("memo"),
+    )
+    existing = (db.query(Invoice)
+                .filter(Invoice.linked_account_id == account.id, Invoice.remote_id == remote_id)
+                .one_or_none())
+    if existing is None:
+        db.add(Invoice(id=uid(), linked_account_id=account.id, remote_id=remote_id,
+                       remote_extra=remote_extra, **data))
+        return "added"
+    changed = _apply(existing, data)
+    existing.remote_extra = remote_extra
+    return "updated" if changed else "unchanged"
+
+
 def _upsert_deal(db: Session, account: LinkedAccount, row: dict) -> str:
     remote_id = str(row.get("remote_id") or "DL-0")
     remote_extra = _remote_extra(account, row)
@@ -102,7 +151,29 @@ def _upsert_deal(db: Session, account: LinkedAccount, row: dict) -> str:
     return "updated" if changed else "unchanged"
 
 
-_LOADER = {"ticket": _upsert_ticket, "contact": _upsert_contact, "deal": _upsert_deal}
+_LOADER = {"ticket": _upsert_ticket, "contact": _upsert_contact, "deal": _upsert_deal,
+           "employee": _upsert_employee, "invoice": _upsert_invoice}
+
+_MODEL_NAMES = {"ticket": "Ticket", "contact": "Contact", "deal": "Deal",
+                "employee": "Employee", "invoice": "Invoice"}
+
+_WANTED = {"ticketing": ("ticket",), "crm": ("contact", "deal"),
+           "hris": ("employee",), "accounting": ("invoice",)}
+
+
+def _apply_field_mappings(account: LinkedAccount, model: str, row: dict) -> dict:
+    """Per-account field mappings (Merge-style): {remote_field: common_field}.
+
+    Provider payloads use the provider's own names; mappings rename them onto the
+    Common Model before upsert. Unmapped provider fields keep flowing into
+    remote_data (nothing is dropped).
+    """
+    mappings = (account.settings or {}).get("field_mappings") or {}
+    for_model = mappings.get(model) or {}
+    for remote_field, common_field in for_model.items():
+        if remote_field in row and common_field and common_field not in row:
+            row = {**row, common_field: row[remote_field]}
+    return row
 
 
 def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | None = None,
@@ -121,7 +192,7 @@ def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | 
     """
     connector = registry.require(account.integration)
     rows = connector.generate_sample(account.category) or []
-    wanted = ("ticket",) if account.category == "ticketing" else ("contact", "deal")
+    wanted = _WANTED[account.category]
 
     settings = account.settings or {}
     selective = settings.get("selective_sync") or {}
@@ -135,7 +206,7 @@ def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | 
         row_type = row.get("type") or ("ticket" if "title" in row else "contact")
         if row_type not in wanted:
             continue
-        model = {"ticket": "Ticket", "contact": "Contact", "deal": "Deal"}[row_type]
+        model = _MODEL_NAMES[row_type]
         if selective.get(model) is False:
             skipped += 1
             continue
@@ -144,7 +215,7 @@ def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | 
             continue
         loader = _LOADER[row_type]
         try:
-            verdict = loader(db, account, row)
+            verdict = loader(db, account, _apply_field_mappings(account, model, row))
         except Exception as error:  # noqa: BLE001 — record and keep syncing
             db.rollback()
             errors += 1

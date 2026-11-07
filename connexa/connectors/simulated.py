@@ -266,6 +266,91 @@ class HelpdeskLikeConnector(Connector):
         return rows
 
 
+class PeopleOsConnector(Connector):
+    """HRIS data-plane source: employees sync onto the Employee Common Model."""
+    slug = "peopleos"
+    name = "PeopleOS HRIS"
+    description = "Simulated HRIS: employees, departments and managers for the HRIS data plane."
+    auth_type = "token"
+    real_lane_ready = False
+
+    class SearchEmployeesInput(BaseModel):
+        query: str
+
+    def build_tools(self) -> list[ToolSpec]:
+        def search_employees(ctx: ToolContext, inp: "PeopleOsConnector.SearchEmployeesInput") -> dict:
+            needle = inp.query.lower()
+            matches = [e for e in self.generate_sample("hris")
+                       if needle in (e.get("first_name", "") + " " + e.get("last_name", "")).lower()]
+            return {"total": len(matches), "employees": matches[:5]}
+
+        return [ToolSpec(name="search_employees", description="Find employees by name in the HRIS.",
+                         handler=search_employees, input_model=self.SearchEmployeesInput,
+                         credit_type="low", annotations={"readOnlyHint": True})]
+
+    def generate_sample(self, category: str) -> list[dict]:
+        if category != "hris":
+            return []
+        base = datetime.now(timezone.utc)
+        staff = [
+            ("Dana", "Whitfield", "Engineering", "Staff Engineer", None, "full_time"),
+            ("Marcus", "Reed", "Engineering", "Engineering Manager", "Dana Whitfield", "full_time"),
+            ("Priya", "Nair", "Support", "Support Lead", None, "full_time"),
+            ("Tom", "Okafor", "Support", "Support Specialist", "Priya Nair", "full_time"),
+            ("Elena", "Rossi", "Finance", "Controller", None, "full_time"),
+            ("Jae", "Kim", "Finance", "AP Clerk", "Elena Rossi", "part_time"),
+            ("Sara", "Lindgren", "Design", "Product Designer", None, "contractor"),
+            ("Noah", "Berg", "Sales", "Account Executive", None, "full_time"),
+        ]
+        rows = []
+        for i, (f, l, dept, position, manager, emp_type) in enumerate(staff):
+            rows.append({
+                "remote_id": f"EMP-{400 + i}", "first_name": f, "last_name": l,
+                "email": f"{f.lower()}.{l.lower()}@peopleos.example", "team": dept,   # 'team' = provider-specific field (mappable)
+                "position": position, "manager": manager, "employment_type": emp_type,
+                "type": "employee", "created": _fake_stamp(base, 720 * (i + 1)),
+            })
+        return rows
+
+
+class LedgerlyConnector(Connector):
+    """Accounting data-plane source: invoices sync onto the Invoice Common Model."""
+    slug = "ledgerly"
+    name = "Ledgerly Books"
+    description = "Simulated accounting: invoices and vendors for the accounting data plane."
+    auth_type = "token"
+    real_lane_ready = False
+
+    def build_tools(self) -> list[ToolSpec]:
+        def noop(ctx: ToolContext, inp: None) -> dict:  # noqa: ARG001
+            return {"ok": True}
+        return [ToolSpec(name="ping", description="Availability check for Ledgerly Books.",
+                         handler=noop, input_model=type("Ping", (BaseModel,), {}), credit_type="low",
+                         annotations={"readOnlyHint": True, "idempotentHint": True})]
+
+    def generate_sample(self, category: str) -> list[dict]:
+        if category != "accounting":
+            return []
+        bills = [
+            ("INV-2026-041", "paid", "Northwind Ltd", 4_800.0, "2026-09-30", "2026-10-30"),
+            ("INV-2026-042", "submitted", "Oz Labs", 1_950.0, "2026-10-14", "2026-11-14"),
+            ("INV-2026-043", "draft", "Fieldstone", 620.5, "2026-10-20", "2026-11-20"),
+            ("INV-2026-044", "paid", "Brightline", 12_000.0, "2026-08-02", "2026-09-01"),
+            ("INV-2026-045", "void", "Muse & Co", 310.0, "2026-07-11", "2026-08-10"),
+            ("INV-2026-046", "submitted", "Delta Port", 7_300.0, "2026-10-25", "2026-11-25"),
+        ]
+        rows = []
+        for i, (number, status, vendor, total, issued, due) in enumerate(bills):
+            rows.append({
+                "remote_id": f"LED-{900 + i}", "invoice_number": number, "status": status,
+                "vendor": vendor, "total": total, "currency": "USD",
+                "issued": issued, "due": due,
+                "memo": f"Net-30 services for {vendor}.",
+                "type": "invoice",
+            })
+        return rows
+
+
 class SalespodLikeConnector(Connector):
     slug = "salespod"
     name = "SalesPod CRM"

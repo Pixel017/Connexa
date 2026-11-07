@@ -4,6 +4,7 @@ and credential capture. This is the human half of every connection.
 from __future__ import annotations
 
 import os
+import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -11,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from .common_models import DATA_CATEGORIES
 from .db import get_db
 from .security import data_plane_key
 from .models import LinkToken, LinkedAccount, Org
@@ -29,25 +31,38 @@ templates = Jinja2Templates(directory=TEMPLATE_DIR)
 # ---------------------------------------------------------------- dashboard API
 
 class LinkTokenRequest(BaseModel):
-    categories: list[str] = Field(default_factory=lambda: ["ticketing", "crm"])
+    categories: list[str] = Field(default_factory=lambda: ["ticketing", "crm", "hris", "accounting"])
     integration: str | None = None
+    # Link flow customization (Merge-Link-style theming):
+    company_name: str | None = None
+    logo_url: str | None = None
+    accent_color: str | None = None     # "#RRGGBB"
+    welcome_text: str | None = None
 
 
 @api_router.post("/link-tokens")
 def create_link_token(data: LinkTokenRequest, auth=Depends(data_plane_key), db: Session = Depends(get_db)):
     key, org = auth
     for category in data.categories:
-        if category not in ("ticketing", "crm"):
+        if category not in DATA_CATEGORIES:
             raise HTTPException(400, {"detail": f"Unsupported category '{category}'."})
+    if data.accent_color and not re.fullmatch(r"#[0-9a-fA-F]{6}", data.accent_color):
+        raise HTTPException(400, {"detail": "accent_color must look like '#3b5bdb'."})
     token = LinkToken(id=uid(), org_id=org.id, token=new_token("cxl"), categories=data.categories,
-                      integration=data.integration)
+                      integration=data.integration,
+                      company_name=(data.company_name or "")[:120] or None,
+                      logo_url=(data.logo_url or "")[:400] or None,
+                      accent_color=data.accent_color,
+                      welcome_text=(data.welcome_text or "")[:300] or None)
     db.add(token)
     db.commit()
     audit(db, event_type="LINK_TOKEN_CREATED", description=token.token, org_id=org.id, key_id=key.id)
     return {"link_token": token.token,
             "expires_at": iso(token.expires_at),
             "url": f"/link/{token.token}",
-            "categories": token.categories}
+            "categories": token.categories,
+            "customize": {"company_name": token.company_name, "logo_url": token.logo_url,
+                          "accent_color": token.accent_color, "welcome_text": token.welcome_text}}
 
 
 @api_router.get("/linked-accounts")
@@ -77,6 +92,8 @@ def link_page(token_value: str, request: Request, db: Session = Depends(get_db))
         "token": token_value,
         "options": options,
         "selected_integration": token.integration,
+        "custom": {"company_name": token.company_name, "logo_url": token.logo_url,
+                   "accent_color": token.accent_color, "welcome_text": token.welcome_text},
     })
 
 
@@ -95,9 +112,11 @@ def connect(token_value: str, data: ConnectRequest, background: BackgroundTasks,
     if not token or token.status != "ready" or token.expires_at < naive_now():
         raise HTTPException(410, {"detail": "Link token expired or already used."})
     connector = registry.get(data.integration)
-    if not connector or not connector.generate_sample("ticketing") and not connector.generate_sample("crm"):
+    if not connector:
         raise HTTPException(400, {"detail": f"'{data.integration}' is not a connectable integration."})
-    category = "ticketing" if connector.generate_sample("ticketing") else "crm"
+    category = next((c for c in DATA_CATEGORIES if connector.generate_sample(c)), None)
+    if category is None:
+        raise HTTPException(400, {"detail": f"'{data.integration}' has no data-plane source."})
     if category not in token.categories:
         raise HTTPException(400, {"detail": f"Integration '{data.integration}' is outside this link token's categories."})
 

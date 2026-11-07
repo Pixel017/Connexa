@@ -6,6 +6,10 @@ TICKET_STATUSES = ["open", "pending", "draft", "in_progress", "resolved", "close
 TICKET_PRIORITIES = ["low", "medium", "high", "urgent"]
 DEAL_STAGES = ["prospecting", "proposal", "negotiation", "won", "lost"]
 CONTACT_STAGES = ["lead", "qualified", "customer", "unqualified"]
+EMPLOYEE_TYPES = ["full_time", "part_time", "contractor", "intern"]
+INVOICE_STATUSES = ["draft", "submitted", "paid", "void"]
+
+DATA_CATEGORIES = ("ticketing", "crm", "hris", "accounting")
 
 COMMON_MODELS: dict[str, dict[str, Any]] = {
     "ticketing": {
@@ -40,6 +44,37 @@ COMMON_MODELS: dict[str, dict[str, Any]] = {
                 "stage": {"type": "enum", "values": DEAL_STAGES, "required_on_create": False},
                 "amount": {"type": "number", "required_on_create": False},
                 "currency": {"type": "string", "required_on_create": False},
+            },
+            "read_only": ["id", "remote_id", "created_at", "updated_at", "remote_data"],
+        },
+    },
+    "hris": {
+        "models": ["Employee"],
+        "Employee": {
+            "fields": {
+                "first_name": {"type": "string", "required_on_create": True},
+                "last_name": {"type": "string", "required_on_create": False},
+                "email": {"type": "string", "required_on_create": False},
+                "department": {"type": "string", "required_on_create": False},
+                "position": {"type": "string", "required_on_create": False},
+                "manager_name": {"type": "string", "required_on_create": False},
+                "employment_type": {"type": "enum", "values": EMPLOYEE_TYPES, "required_on_create": False},
+            },
+            "read_only": ["id", "remote_id", "created_at", "updated_at", "remote_data"],
+        },
+    },
+    "accounting": {
+        "models": ["Invoice"],
+        "Invoice": {
+            "fields": {
+                "invoice_number": {"type": "string", "required_on_create": False},
+                "status": {"type": "enum", "values": INVOICE_STATUSES, "required_on_create": False},
+                "vendor_name": {"type": "string", "required_on_create": True},
+                "total_amount": {"type": "number", "required_on_create": True},
+                "currency": {"type": "string", "required_on_create": False},
+                "issue_date": {"type": "string", "required_on_create": False},
+                "due_date": {"type": "string", "required_on_create": False},
+                "memo": {"type": "string", "required_on_create": False},
             },
             "read_only": ["id", "remote_id", "created_at", "updated_at", "remote_data"],
         },

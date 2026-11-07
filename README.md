@@ -215,6 +215,67 @@ curl -X POST localhost:8000/v1/chat/completions -H "Authorization: Bearer $GATEW
 
 ---
 
+## Categories & Common Models
+
+Four data categories ship in one process, each with a normalized Common Model contract
+(`GET /api/{cat}/v1/meta/write-schema` before writes):
+
+| Category | Common Models | Starter connectors (data plane) |
+|---|---|---|
+| Ticketing | `Ticket` | helpdesk |
+| CRM | `Contact`, `Deal` | hubspot, salespod |
+| HRIS | `Employee` | peopleos |
+| Accounting | `Invoice` | ledgerly |
+
+Every category gets the full data-plane surface automatically: link → initial sync →
+list/get/create → sync schedule → issues → erasure → field scopes → passthrough-ready.
+
+## Field mappings (per account)
+
+Provider payloads use provider names; mappings rename them onto the Common Model before
+normalization — the same idea as Merge's field mappings, applied by the sync engine:
+
+```bash
+curl -X PUT localhost:8000/api/hris/v1/accounts/$TOKEN/field-mappings \
+  -H "Authorization: Bearer $DATA_KEY" \
+  -d '{"mappings": {"Employee": {"team": "department", "manager": "manager_name"}}}'
+# -> mappings stored AND a re-sync runs immediately: department/manager_name populate
+
+curl localhost:8000/api/hris/v1/accounts/$TOKEN/field-mappings/suggestions
+# -> {"suggestions": {"Employee": {"unmapped_provider_fields": {"team": 8, ...},
+#                                  "suggested_targets": {"team": "department"}}}}
+```
+
+- Invalid targets are rejected (must be real Common Model fields)
+- Unmapped provider fields always keep flowing into `remote_data` — nothing is dropped
+- Console → Linked Accounts → **Field mappings** editor (add/remove + auto re-sync)
+
+## Webhook retries with backoff
+
+A failed delivery is never silent: the scheduler re-drives retries with exponential
+backoff (**30s → 2m → 10m**, 4 attempts total), recording every attempt on the delivery
+row (Console → Webhooks shows attempts + next retry). Endpoint deleted → retries stop.
+
+## Link flow customization
+
+Link tokens accept theming shown on the end-user connect screen:
+
+```bash
+curl -X POST localhost:8000/api/link-tokens -H "Authorization: Bearer $DATA_KEY" -d '{
+  "categories": ["hris"],
+  "company_name": "Acme Corp", "accent_color": "#00a854",
+  "logo_url": "https://acme.example/logo.png",
+  "welcome_text": "Acme needs ERP access."}'
+```
+
+## DLP on both sides of the model
+
+Request-side: prompts are scanned before dispatch — BLOCK refuses (403), REDACT rewrites.
+Response-side: model output is scanned before it leaves the gateway — matches are
+redacted and reported in the `connexa.dlp` envelope. Every action is audited.
+
+---
+
 ## Connectors
 
 | Slug | Lane | Credentials | Live data |
@@ -341,7 +402,7 @@ Original code throughout — the platform reimplements *architectural patterns* 
 ## Roadmap candidates
 
 - Grow the live connector set (Calendar, Drive, HubSpot, Jira, Stripe …) — mostly `RestCall` declarations now that the SDK exists
-- More categories (HRIS, File Storage) — add a Common Model + adapters
+- More categories (ATS, File Storage) — the Common Model + adapter pattern is proven by HRIS/Accounting
 - Per-registered-user credential vault; prebuilt Okta / Entra SCIM connectors
-- Webhook retries with backoff; cross-process job queue
-- Response-side DLP scanning (request-side is live); console multi-user RBAC
+- Streaming-response DLP (non-streaming responses redacted today)
+- Cross-process job queue for multi-worker deployments

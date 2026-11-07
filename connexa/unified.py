@@ -19,8 +19,9 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from .security import data_plane_key
-from .models import LinkedAccount, SyncIssue, Ticket, Contact, Deal, Org, ApiKey
-from .common_models import COMMON_MODELS, TICKET_STATUSES, TICKET_PRIORITIES, DEAL_STAGES, CONTACT_STAGES
+from .models import (LinkedAccount, SyncIssue, Ticket, Contact, Deal, Employee, Invoice, Org, ApiKey)
+from .common_models import (COMMON_MODELS, DATA_CATEGORIES, TICKET_STATUSES, TICKET_PRIORITIES,
+                            DEAL_STAGES, CONTACT_STAGES)
 from .metering import usage, audit
 from .utils import uid, now, iso
 from .events import emit
@@ -89,7 +90,7 @@ def _account(authorization_required_account: str | None, db: Session, org: Org) 
 
 
 def _resolve_public_token(category: str, public_token: str, org: Org, db: Session) -> LinkedAccount:
-    if category not in ("ticketing", "crm"):
+    if category not in DATA_CATEGORIES:
         raise HTTPException(404, {"detail": f"Unknown category '{category}'."})
     account = (db.query(LinkedAccount)
                .filter(LinkedAccount.account_token == public_token, LinkedAccount.org_id == org.id)
@@ -117,7 +118,7 @@ def _pager(rows: list, request_path: str, limit_param: int, offset_param: int) -
 def exchange_account_token(category: str, public_token: str,
                            background: BackgroundTasks,
                            auth=Depends(data_plane_key), db: Session = Depends(get_db)):
-    if category not in ("ticketing", "crm"):
+    if category not in DATA_CATEGORIES:
         raise HTTPException(404, {"detail": f"Unknown category '{category}'."})
     key, org = auth
     account = db.query(LinkedAccount).filter(
@@ -198,7 +199,7 @@ def erase_account(category: str, public_token: str, auth=Depends(data_plane_key)
     """Access & erasure: remove a linked account and every normalized row derived
     from it. Required for end-user deletion requests (GDPR-style erasure)."""
     key, org = auth
-    if category not in ("ticketing", "crm"):
+    if category not in DATA_CATEGORIES:
         raise HTTPException(404, {"detail": f"Unknown category '{category}'."})
     account = db.query(LinkedAccount).filter(
         LinkedAccount.account_token == public_token, LinkedAccount.org_id == org.id).first()
@@ -206,10 +207,12 @@ def erase_account(category: str, public_token: str, auth=Depends(data_plane_key)
         raise HTTPException(404, {"detail": "Unknown public token."})
     if account.category != category:
         raise HTTPException(400, {"detail": f"This public token belongs to category '{account.category}'."})
-    counts = {"Ticket": 0, "Contact": 0, "Deal": 0}
+    counts = {"Ticket": 0, "Contact": 0, "Deal": 0, "Employee": 0, "Invoice": 0}
     counts["Ticket"] = db.query(Ticket).filter(Ticket.linked_account_id == account.id).delete()
     counts["Contact"] = db.query(Contact).filter(Contact.linked_account_id == account.id).delete()
     counts["Deal"] = db.query(Deal).filter(Deal.linked_account_id == account.id).delete()
+    counts["Employee"] = db.query(Employee).filter(Employee.linked_account_id == account.id).delete()
+    counts["Invoice"] = db.query(Invoice).filter(Invoice.linked_account_id == account.id).delete()
     db.query(SyncIssue).filter(SyncIssue.linked_account_id == account.id).delete()
     integration, erased_id = account.integration, account.id
     db.delete(account)
@@ -458,3 +461,239 @@ def _connector_ctx(account: LinkedAccount):
     return ToolContext(connector_slug=connector.slug, credentials=account.credentials,
                        env_token=connector.real_lane_ready and getattr(connector, "env_token", "") or "",
                        registered_user_id=None, agent_org_id=None)
+
+
+# ------------------------------------------------------------ HRIS
+
+def _row_to_employee(e: Employee) -> dict:
+    return {"id": e.id, "remote_id": e.remote_id, "first_name": e.first_name, "last_name": e.last_name,
+            "email": e.email, "department": e.department, "position": e.position,
+            "manager_name": e.manager_name, "employment_type": e.employment_type,
+            "created_at": iso(e.created_at), "updated_at": iso(e.updated_at),
+            "remote_data": e.remote_extra}
+
+
+class EmployeeCreate(BaseModel):
+    first_name: str = Field(min_length=1, max_length=80)
+    last_name: str = ""
+    email: str | None = None
+    department: str | None = None
+    position: str | None = None
+    manager_name: str | None = None
+    employment_type: str = "full_time"
+
+
+@router.get("/hris/v1/employees")
+def list_employees(limit: int = 20, offset: int = 0, include_remote_data: bool = True,
+                   auth=Depends(data_plane_key), db: Session = Depends(get_db),
+                   account_token: str | None = Header(default=None, alias="X-Account-Token")):
+    key, org = auth
+    account = _account(account_token, db, org)
+    rows = (db.query(Employee).filter(Employee.linked_account_id == account.id)
+            .order_by(Employee.created_at.desc()).limit(limit).offset(offset).all())
+    return {"count": len(rows), "_next": _next_cursor(limit, offset),
+            "results": [_minimize(_apply_field_scopes(key, "Employee", _row_to_employee(r)),
+                                  include_remote_data) for r in rows]}
+
+
+@router.get("/hris/v1/employees/{employee_id}")
+def get_employee(employee_id: str, include_remote_data: bool = True, auth=Depends(data_plane_key),
+                 db: Session = Depends(get_db),
+                 account_token: str | None = Header(default=None, alias="X-Account-Token")):
+    key, org = auth
+    account = _account(account_token, db, org)
+    row = db.query(Employee).filter(Employee.id == employee_id, Employee.linked_account_id == account.id).first()
+    if not row:
+        raise HTTPException(404, {"detail": f"No Employee found with id={employee_id}."})
+    return _minimize(_apply_field_scopes(key, "Employee", _row_to_employee(row)), include_remote_data)
+
+
+@router.post("/hris/v1/employees", status_code=201)
+def create_employee(data: EmployeeCreate, background: BackgroundTasks, auth=Depends(data_plane_key),
+                    db: Session = Depends(get_db),
+                    account_token: str | None = Header(default=None, alias="X-Account-Token")):
+    key, org = auth
+    account = _account(account_token, db, org)
+    if data.employment_type not in COMMON_MODELS["hris"]["Employee"]["fields"]["employment_type"]["values"]:
+        raise HTTPException(400, {"detail": f"employment_type must be one of "
+                                            f"{COMMON_MODELS['hris']['Employee']['fields']['employment_type']['values']}."})
+    row = Employee(id=uid(), linked_account_id=account.id, remote_id=str(_next_remote(account.id)),
+                   first_name=data.first_name, last_name=data.last_name, email=data.email,
+                   department=data.department, position=data.position, manager_name=data.manager_name,
+                   employment_type=data.employment_type,
+                   remote_extra={"source": account.integration, "written": True})
+    db.add(row)
+    db.commit()
+    emit(db, background, event="Employee.synced", org_id=org.id, payload_data={
+        "employee_id": row.id, "remote_id": row.remote_id, "integration": account.integration})
+    usage(db, plane="data", kind="hris_write", org_id=org.id, key_id=key.id, units=1.0, credit_type="low")
+    return _row_to_employee(row)
+
+
+@router.get("/hris/v1/meta/write-schema")
+def hris_meta(auth=Depends(data_plane_key), db: Session = Depends(get_db)):
+    _key, _org = auth
+    return {"category": "hris", "Employee": COMMON_MODELS["hris"]["Employee"]}
+
+
+# ------------------------------------------------------------ accounting
+
+def _row_to_invoice(inv: Invoice) -> dict:
+    return {"id": inv.id, "remote_id": inv.remote_id, "invoice_number": inv.invoice_number,
+            "status": inv.status, "vendor_name": inv.vendor_name, "total_amount": inv.total_amount,
+            "currency": inv.currency, "issue_date": inv.issue_date, "due_date": inv.due_date,
+            "memo": inv.memo, "created_at": iso(inv.created_at), "updated_at": iso(inv.updated_at),
+            "remote_data": inv.remote_extra}
+
+
+class InvoiceCreate(BaseModel):
+    vendor_name: str = Field(min_length=1, max_length=160)
+    total_amount: float = Field(gt=0)
+    invoice_number: str | None = None
+    status: str = "draft"
+    currency: str = "USD"
+    issue_date: str | None = None
+    due_date: str | None = None
+    memo: str | None = None
+
+
+@router.get("/accounting/v1/invoices")
+def list_invoices(limit: int = 20, offset: int = 0, include_remote_data: bool = True,
+                  auth=Depends(data_plane_key), db: Session = Depends(get_db),
+                  account_token: str | None = Header(default=None, alias="X-Account-Token")):
+    key, org = auth
+    account = _account(account_token, db, org)
+    rows = (db.query(Invoice).filter(Invoice.linked_account_id == account.id)
+            .order_by(Invoice.created_at.desc()).limit(limit).offset(offset).all())
+    return {"count": len(rows), "_next": _next_cursor(limit, offset),
+            "results": [_minimize(_apply_field_scopes(key, "Invoice", _row_to_invoice(r)),
+                                  include_remote_data) for r in rows]}
+
+
+@router.get("/accounting/v1/invoices/{invoice_id}")
+def get_invoice(invoice_id: str, include_remote_data: bool = True, auth=Depends(data_plane_key),
+                db: Session = Depends(get_db),
+                account_token: str | None = Header(default=None, alias="X-Account-Token")):
+    key, org = auth
+    account = _account(account_token, db, org)
+    row = db.query(Invoice).filter(Invoice.id == invoice_id, Invoice.linked_account_id == account.id).first()
+    if not row:
+        raise HTTPException(404, {"detail": f"No Invoice found with id={invoice_id}."})
+    return _minimize(_apply_field_scopes(key, "Invoice", _row_to_invoice(row)), include_remote_data)
+
+
+@router.post("/accounting/v1/invoices", status_code=201)
+def create_invoice(data: InvoiceCreate, background: BackgroundTasks, auth=Depends(data_plane_key),
+                   db: Session = Depends(get_db),
+                   account_token: str | None = Header(default=None, alias="X-Account-Token")):
+    key, org = auth
+    account = _account(account_token, db, org)
+    if data.status not in COMMON_MODELS["accounting"]["Invoice"]["fields"]["status"]["values"]:
+        raise HTTPException(400, {"detail": f"status must be one of "
+                                            f"{COMMON_MODELS['accounting']['Invoice']['fields']['status']['values']}."})
+    row = Invoice(id=uid(), linked_account_id=account.id, remote_id=str(_next_remote(account.id)),
+                  invoice_number=data.invoice_number, status=data.status, vendor_name=data.vendor_name,
+                  total_amount=data.total_amount, currency=data.currency or "USD",
+                  issue_date=data.issue_date, due_date=data.due_date, memo=data.memo,
+                  remote_extra={"source": account.integration, "written": True})
+    db.add(row)
+    db.commit()
+    emit(db, background, event="Invoice.synced", org_id=org.id, payload_data={
+        "invoice_id": row.id, "remote_id": row.remote_id, "integration": account.integration})
+    usage(db, plane="data", kind="accounting_write", org_id=org.id, key_id=key.id, units=1.0, credit_type="medium")
+    return _row_to_invoice(row)
+
+
+@router.get("/accounting/v1/meta/write-schema")
+def accounting_meta(auth=Depends(data_plane_key), db: Session = Depends(get_db)):
+    _key, _org = auth
+    return {"category": "accounting", "Invoice": COMMON_MODELS["accounting"]["Invoice"]}
+
+
+# ------------------------------------------------------------ field mappings
+
+class FieldMappingsUpdate(BaseModel):
+    """{model: {remote_field: common_field}} — replaces the mappings for the listed models."""
+    mappings: dict[str, dict[str, str]]
+
+
+@router.get("/{category}/v1/accounts/{public_token}/field-mappings")
+def get_field_mappings(category: str, public_token: str, auth=Depends(data_plane_key),
+                       db: Session = Depends(get_db)):
+    _key, org = auth
+    account = _resolve_public_token(category, public_token, org, db)
+    return {"integration": account.integration,
+            "mappings": (account.settings or {}).get("field_mappings") or {},
+            "common_models": {m: sorted(COMMON_MODELS[category][m]["fields"])
+                              for m in COMMON_MODELS[category]["models"]}}
+
+
+@router.put("/{category}/v1/accounts/{public_token}/field-mappings")
+def put_field_mappings(category: str, public_token: str, data: FieldMappingsUpdate,
+                       auth=Depends(data_plane_key), db: Session = Depends(get_db)):
+    """Set per-account field mappings. Every target must be a real Common Model field —
+    the sync engine applies them to provider payloads before normalization."""
+    key, org = auth
+    account = _resolve_public_token(category, public_token, org, db)
+    for model, pairs in data.mappings.items():
+        if model not in COMMON_MODELS[category]["models"]:
+            raise HTTPException(400, {"detail": f"Unknown model '{model}' for category '{category}'."})
+        valid = set(COMMON_MODELS[category][model]["fields"])
+        for remote_field, common_field in pairs.items():
+            if common_field not in valid:
+                raise HTTPException(400, {"detail": f"'{common_field}' is not a field of {model} "
+                                                    f"(valid: {sorted(valid)})."})
+    settings = dict(account.settings or {})
+    merged = {**settings.get("field_mappings", {}), **data.mappings}
+    settings["field_mappings"] = merged
+    account.settings = settings
+    db.commit()
+    audit(db, event_type="FIELD_MAPPINGS_SET", org_id=org.id, key_id=key.id,
+          description=f"{account.integration}: {merged}")
+    # Re-sync immediately so mappings take effect on existing remote payloads.
+    from .sync import run_sync
+    summary = run_sync(db, account, actor="field-mappings")
+    return {"integration": account.integration, "mappings": merged,
+            "reapplied_sync": {"added": summary["added"], "updated": summary["updated"],
+                               "unchanged": summary["unchanged"]}}
+
+
+@router.get("/{category}/v1/accounts/{public_token}/field-mappings/suggestions")
+def field_mapping_suggestions(category: str, public_token: str, auth=Depends(data_plane_key),
+                              db: Session = Depends(get_db)):
+    """Provider fields seen in recent payloads that don't map onto a Common Model field,
+    with a best-effort target suggestion (name similarity + value-shape sniffing)."""
+    _key, org = auth
+    account = _resolve_public_token(category, public_token, org, db)
+    settings = account.settings or {}
+    mappings = settings.get("field_mappings") or {}
+    common_fields = {m: set(COMMON_MODELS[category][m]["fields"]) for m in COMMON_MODELS[category]["models"]}
+
+    def _suggest(target: str, candidates: list[str]) -> str | None:
+        target_key = target.replace("_", "")
+        for candidate in candidates:
+            if candidate.replace("_", "") == target_key:
+                return candidate
+        return None
+
+    from .models import Ticket as _T, Contact as _C, Deal as _D, Employee as _E, Invoice as _I
+    row_models = {"Ticket": _T, "Contact": _C, "Deal": _D, "Employee": _E, "Invoice": _I}
+    suggestions: dict[str, dict] = {}
+    for model, fields in common_fields.items():
+        table = row_models.get(model)
+        if table is None:
+            continue
+        seen: dict[str, int] = {}
+        for extra in (db.query(table.remote_extra)
+                      .filter(table.linked_account_id == account.id).limit(50).all()):
+            payload = (extra[0] or {}).get("remote_payload") or {}
+            for field_name in payload:
+                seen[field_name] = seen.get(field_name, 0) + 1
+        mapped = mappings.get(model) or {}
+        unmapped = {name: count for name, count in seen.items()
+                    if name not in fields and name not in mapped}
+        if unmapped:
+            proposals = {name: _suggest(name, sorted(fields)) for name in unmapped}
+            suggestions[model] = {"unmapped_provider_fields": unmapped,
+                                  "suggested_targets": proposals}
+    return {"integration": account.integration, "suggestions": suggestions}

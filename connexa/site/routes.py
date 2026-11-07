@@ -13,6 +13,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..common_models import DATA_CATEGORIES
 from ..connectors.registry import registry
 
 router = APIRouter(tags=["site"])
@@ -183,12 +184,9 @@ def integrations(request: Request):
         entry = {"name": connector.name, "slug": connector.slug,
                  "auth": getattr(connector, "auth_type", "token"),
                  "real": connector.real_lane_ready}
-        if connector.generate_sample("ticketing") or connector.generate_sample("crm"):
-            entry["categories"] = []
-            if connector.generate_sample("ticketing"):
-                entry["categories"].append("ticketing")
-            if connector.generate_sample("crm"):
-                entry["categories"].append("crm")
+        categories = [c for c in DATA_CATEGORIES if connector.generate_sample(c)]
+        if categories:
+            entry["categories"] = categories
             data_connectors.append(entry)
         else:
             tool_connectors.append(entry)

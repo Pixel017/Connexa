@@ -51,6 +51,9 @@ def tick(db: Session, background=None) -> list[dict]:
                              message=f"scheduled sync failed: {error}"))
             audit(db, event_type="SYNC_ISSUE", org_id=account.org_id, actor="scheduler",
                   description=f"{account.integration}: {str(error)[:120]}")
+    # Webhook retry pass: re-deliver failed webhooks whose backoff elapsed.
+    from .events import process_due_retries
+    process_due_retries(db)
     return summaries
 
 

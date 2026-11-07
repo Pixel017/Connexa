@@ -9,7 +9,7 @@
 {% if accounts %}
 <table>
   <tr><th>Integration</th><th>Category</th><th>Connected as</th><th>Status</th><th>Account token</th>
-      <th>Tickets</th><th>Contacts</th><th>Deals</th><th>Last sync</th><th></th></tr>
+      <th>Rows</th><th>Last sync</th><th></th></tr>
   {% for a in accounts %}
   <tr>
     <td><strong>{{ a.connector_name }}</strong><br><span class="muted">{{ a.integration }}</span></td>
@@ -17,9 +17,10 @@
     <td>{{ a.end_user_name or "—" }}</td>
     <td>{% if a.status == "live" %}<span class="pill ok">live</span>{% else %}<span class="pill no">{{ a.status }}</span>{% endif %}</td>
     <td><code>{{ a.account_token[:9] }}…</code></td>
-    <td>{{ a.tickets_n }}</td>
-    <td>{{ a.contacts_n }}</td>
-    <td>{{ a.deals_n }}</td>
+    <td>{% for label, n in [("tickets", a.tickets_n), ("contacts", a.contacts_n), ("deals", a.deals_n),
+                            ("employees", a.employees_n), ("invoices", a.invoices_n)] %}
+        {% if n %}<span class="pill ok">{{ n }} {{ label }}</span>{% endif %}
+        {% endfor %}{% if not (a.tickets_n or a.contacts_n or a.deals_n or a.employees_n or a.invoices_n) %}0{% endif %}</td>
     <td>{{ iso(a.last_synced_at) or "never" }}</td>
     <td>
       <form class="inline" method="post" action="/dashboard/accounts/sync">
@@ -59,9 +60,50 @@
 <p class="muted">No linked accounts yet. Create a link token on the <a href="/dashboard/link">Link &amp; Data</a> page and connect through the browser flow — the initial sync runs automatically.</p>
 {% endif %}
 
+<h2>Field mappings</h2>
+<p class="muted">Map provider-specific fields onto Common Model fields per account. The sync engine applies
+mappings before normalization, then re-syncs. Unmapped provider fields still flow into <code>remote_data</code>.</p>
+{% for a in accounts %}
+<details {% if not loop.first %}{% endif %}>
+  <summary><strong>{{ a.connector_name }}</strong> <span class="muted">({{ a.category }})</span>
+    — {{ a.mapping_count }} mapping{{ "s" if a.mapping_count != 1 }}</summary>
+  {% if a.mappings %}
+  <table>
+    <tr><th>Common Model</th><th>Provider field</th><th>→ Common field</th><th></th></tr>
+    {% for model, pairs in a.mappings.items() %}
+    {% for remote_field, common_field in pairs.items() %}
+    <tr>
+      <td>{{ model }}</td><td><code>{{ remote_field }}</code></td><td>→ <code>{{ common_field }}</code></td>
+      <td><form class="inline" method="post" action="/dashboard/accounts/mappings/remove">
+        <input type="hidden" name="account_id" value="{{ a.id }}">
+        <input type="hidden" name="model" value="{{ model }}">
+        <input type="hidden" name="remote_field" value="{{ remote_field }}">
+        <button class="small" type="submit">Remove</button>
+      </form></td>
+    </tr>
+    {% endfor %}
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">No custom mappings for this account.</p>{% endif %}
+  <form class="inline" method="post" action="/dashboard/accounts/mappings">
+    <input type="hidden" name="account_id" value="{{ a.id }}">
+    <select name="model">
+      {% for m in a.common_models %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+    </select>
+    <input name="remote_field" placeholder="provider field (e.g. team)" required>
+    <input name="common_field" placeholder="common field (e.g. department)" required>
+    <button class="small" type="submit">Add mapping &amp; re-sync</button>
+  </form>
+</details>
+{% endfor %}
+
 <h2>Sync API</h2>
 <p class="muted">The same operation is available to your backend:</p>
 <div class="code">POST /api/{category}/v1/accounts/{public_token}/sync
 Authorization: Bearer &lt;data key&gt;
-→ {"integration": "jira", "added": 0, "updated": 0, "unchanged": 12, "counts": {"Ticket": 12}}</div>
+→ {"integration": "jira", "added": 0, "updated": 0, "unchanged": 12, "counts": {"Ticket": 12}}
+
+PUT /api/{category}/v1/accounts/{public_token}/field-mappings
+→ {"mappings": {"Employee": {"team": "department"}}}   # applied, then re-synced
+GET /api/{category}/v1/accounts/{public_token}/field-mappings/suggestions</div>
 {% endblock %}

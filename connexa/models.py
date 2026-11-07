@@ -48,10 +48,15 @@ class LinkToken(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), index=True)
     token: Mapped[str] = mapped_column(String(80), unique=True)
-    categories: Mapped[list] = mapped_column(JSON, default=list)          # ["ticketing","crm"]
+    categories: Mapped[list] = mapped_column(JSON, default=list)          # ["ticketing","crm",...]
     integration: Mapped[str | None] = mapped_column(String(60), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="ready")      # ready | used | expired
     expires_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: now() + timedelta(minutes=30))
+    # Link flow customization (theming shown to the end user while connecting):
+    company_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    accent_color: Mapped[str | None] = mapped_column(String(9), nullable=True)   # "#RRGGBB"
+    welcome_text: Mapped[str | None] = mapped_column(String(300), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
@@ -122,6 +127,43 @@ class Deal(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+class Employee(Base):
+    """HRIS Common Model — the normalized employee record."""
+    __tablename__ = "employees"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    linked_account_id: Mapped[str] = mapped_column(ForeignKey("linked_accounts.id"), index=True)
+    remote_id: Mapped[str] = mapped_column(String(60))
+    first_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    department: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    position: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    manager_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    employment_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    remote_extra: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class Invoice(Base):
+    """Accounting Common Model — the normalized invoice record."""
+    __tablename__ = "invoices"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    linked_account_id: Mapped[str] = mapped_column(ForeignKey("linked_accounts.id"), index=True)
+    remote_id: Mapped[str] = mapped_column(String(60))
+    invoice_number: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft")
+    vendor_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    total_amount: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), default="USD")
+    issue_date: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    due_date: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    memo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    remote_extra: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
 # ---------------------------------------------------------------- webhooks
 
 class WebhookEndpoint(Base):
@@ -143,6 +185,8 @@ class WebhookDelivery(Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ok: Mapped[bool] = mapped_column(Boolean, default=False)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # None = no retry pending
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 

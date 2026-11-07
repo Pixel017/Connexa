@@ -14,8 +14,9 @@ from ..connectors.registry import registry
 from ..db import get_db
 from ..models import (ApiKey, AuditEntry, Budget, GatewayModel, LinkToken, LinkedAccount,
                       Org, RegisteredUser, RoutingPolicy, SecurityRule, Skill, SyncIssue,
-                      TeamMembership, Ticket, Contact, Deal, ToolAccessRequest, ToolPack,
-                      UsageLog, WebhookDelivery, WebhookEndpoint, WorkforceMemory, WorkforceTeam)
+                      TeamMembership, Ticket, Contact, Deal, Employee, Invoice, ToolAccessRequest,
+                      ToolPack, UsageLog, WebhookDelivery, WebhookEndpoint, WorkforceMemory,
+                      WorkforceTeam)
 from ..security import admin_cookie_ok, create_api_key
 from ..metering import audit
 from ..utils import iso, uid, new_token
@@ -161,15 +162,21 @@ def accounts_page(request: Request, db: Session = Depends(get_db), flash: str = 
     org = require_admin(request, db)
     accounts = (db.query(LinkedAccount).filter(LinkedAccount.org_id == org.id)
                 .order_by(LinkedAccount.linked_at.desc()).all())
+    from ..common_models import COMMON_MODELS
     for account in accounts:
         account.tickets_n = db.query(Ticket).filter(Ticket.linked_account_id == account.id).count()
         account.contacts_n = db.query(Contact).filter(Contact.linked_account_id == account.id).count()
         account.deals_n = db.query(Deal).filter(Deal.linked_account_id == account.id).count()
+        account.employees_n = db.query(Employee).filter(Employee.linked_account_id == account.id).count()
+        account.invoices_n = db.query(Invoice).filter(Invoice.linked_account_id == account.id).count()
         account.open_issues = (db.query(SyncIssue)
                                .filter(SyncIssue.linked_account_id == account.id, SyncIssue.resolved == False)  # noqa: E712
                                .count())
         connector = registry.get(account.integration)
         account.connector_name = connector.name if connector else account.integration
+        account.mappings = (account.settings or {}).get("field_mappings") or {}
+        account.mapping_count = sum(len(pairs) for pairs in account.mappings.values())
+        account.common_models = COMMON_MODELS.get(account.category, {}).get("models", [])
     return page(request, "accounts.html", {"org": org, "accounts": accounts, "iso": iso, "flash": flash})
 
 
@@ -203,6 +210,60 @@ async def accounts_sync(request: Request, account_id: str = Form(...), db: Sessi
         summary = run_sync(db, account, actor="dashboard")
         flash = (f"Synced {account.integration}: +{summary['added']} added, "
                  f"~{summary['updated']} updated, ={summary['unchanged']} unchanged")
+    else:
+        flash = "Unknown linked account."
+    return RedirectResponse(f"/dashboard/accounts?flash={quote(flash)}", status_code=303)
+
+
+@router.post("/dashboard/accounts/mappings")
+async def accounts_mappings(request: Request, db: Session = Depends(get_db), account_id: str = Form(...),
+                            model: str = Form(...), remote_field: str = Form(...),
+                            common_field: str = Form(...)):
+    org = require_admin(request, db)
+    account = (db.query(LinkedAccount)
+               .filter(LinkedAccount.id == account_id, LinkedAccount.org_id == org.id).first())
+    if not account:
+        return RedirectResponse("/dashboard/accounts?flash=Unknown+linked+account.", status_code=303)
+    from ..common_models import COMMON_MODELS
+    valid = set(COMMON_MODELS.get(account.category, {}).get(model, {}).get("fields", {}))
+    if common_field not in valid:
+        flash = f"'{common_field}' is not a field of {model} (valid: {sorted(valid)})."
+        return RedirectResponse(f"/dashboard/accounts?flash={quote(flash)}", status_code=303)
+    settings = dict(account.settings or {})
+    mappings = {**settings.get("field_mappings", {})}
+    pairs = {**mappings.get(model, {}), remote_field.strip(): common_field.strip()}
+    mappings[model] = pairs
+    settings["field_mappings"] = mappings
+    account.settings = settings
+    db.commit()
+    from ..sync import run_sync
+    summary = run_sync(db, account, actor="field-mappings")
+    audit(db, event_type="FIELD_MAPPINGS_SET", org_id=org.id, actor="dashboard",
+          description=f"{account.integration}: {model}.{remote_field} -> {common_field}")
+    flash = (f"Mapped {model}: {remote_field} → {common_field} and re-synced "
+             f"(+{summary['added']} ~{summary['updated']} ={summary['unchanged']})")
+    return RedirectResponse(f"/dashboard/accounts?flash={quote(flash)}", status_code=303)
+
+
+@router.post("/dashboard/accounts/mappings/remove")
+async def accounts_mappings_remove(request: Request, db: Session = Depends(get_db),
+                                   account_id: str = Form(...), model: str = Form(...),
+                                   remote_field: str = Form(...)):
+    org = require_admin(request, db)
+    account = (db.query(LinkedAccount)
+               .filter(LinkedAccount.id == account_id, LinkedAccount.org_id == org.id).first())
+    if account:
+        settings = dict(account.settings or {})
+        mappings = {**settings.get("field_mappings", {})}
+        pairs = {k: v for k, v in (mappings.get(model) or {}).items() if k != remote_field}
+        if pairs:
+            mappings[model] = pairs
+        else:
+            mappings.pop(model, None)
+        settings["field_mappings"] = mappings
+        account.settings = settings
+        db.commit()
+        flash = f"Removed mapping {model}: {remote_field}."
     else:
         flash = "Unknown linked account."
     return RedirectResponse(f"/dashboard/accounts?flash={quote(flash)}", status_code=303)
