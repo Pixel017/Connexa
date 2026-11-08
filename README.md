@@ -12,6 +12,12 @@
 3. **Agent Handler** — self-serve agent orgs, tool packs, an MCP tool server, and a security gateway
 4. **Gateway** — an OpenAI-compatible LLM router with routing policies, failover, budgets, and credit metering
 
+Plus the SaaS layer that makes it a product, not a demo:
+
+- **Self-serve tenancy** — anyone signs up with email + password and gets live API keys instantly
+- **Enforced plans** — the free plan's limits are actually enforced (402 at connect time), with a billing surface and a Stripe upgrade hook
+- **A real data lane** — `github-issues` syncs *real* GitHub repository issues into the Ticket Common Model (simulated connectors are always honestly labeled `demo`)
+
 All of it runs from a single Python process with SQLite. No build step, no npm, no external services required.
 
 ---
@@ -30,6 +36,8 @@ python -m venv .venv            # already present
 ```bash
 docker compose up --build       # http://localhost:8000 — SQLite persisted in a named volume
 ```
+
+Deploying to a server (HTTPS, backups, upgrades): **[`DEPLOY.md`](DEPLOY.md)**.
 
 Then open **http://127.0.0.1:8000** .
 
@@ -222,7 +230,7 @@ Four data categories ship in one process, each with a normalized Common Model co
 
 | Category | Common Models | Starter connectors (data plane) |
 |---|---|---|
-| Ticketing | `Ticket` | helpdesk |
+| Ticketing | `Ticket` | helpdesk · **github-issues (REAL lane)** |
 | CRM | `Contact`, `Deal` | hubspot, salespod |
 | HRIS | `Employee` | peopleos |
 | Accounting | `Invoice` | ledgerly |
@@ -276,6 +284,56 @@ redacted and reported in the `connexa.dlp` envelope. Every action is audited.
 
 ---
 
+## Self-serve SaaS (org accounts)
+
+Every aspect of running the platform is usable without talking to an operator:
+
+```bash
+# 1) become a tenant — returns live data + gateway API keys (shown once)
+curl -X POST localhost:8000/api/v1/org/signup \
+     -d '{"email": "you@company.com", "password": "at-least-8-chars", "company_name": "Company"}'
+# -> { "data_api_key": "cxk_…", "gateway_api_key": "cxg_…", "plan": "free", … }
+
+# 2) use it: link tokens, syncs, tickets, gateway calls — all immediately live
+
+# 3) come back later: password in, account view out (keys masked)
+curl -X POST localhost:8000/api/v1/org/login \
+     -d '{"email": "you@company.com", "password": "…"}'
+
+# 4) account + billing surfaces (with your data key)
+curl -H "Authorization: Bearer cxk_…" localhost:8000/api/v1/org/me
+curl -H "Authorization: Bearer cxk_…" localhost:8000/api/v1/org/billing
+```
+
+- Passwords hashed with **scrypt** (per-user salt, constant-time verify)
+- **Plans are enforced, not decorative:** `free` allows 3 linked accounts — the 4th connect gets `402 plan_limit_reached` with the plan and limit in the body. `growth` = 25, `scale` = 1M
+- `/api/v1/org/billing` reports real usage against real limits and exposes `upgrade_url` when `CONNEXA_STRIPE_PAYMENT_LINK` is set (pay the link → billing webhook raises the plan); without it the API answers `payments_configured: false` — nothing pretends
+- Agents get the same treatment at `POST /api/v1/agent/signup/` (machine tenants)
+
+## A real data lane: GitHub Issues → Tickets
+
+`github-issues` is the first **real** data-plane connector — no simulation:
+
+```bash
+curl -X POST localhost:8000/api/link-tokens -H "Authorization: Bearer $DATA_KEY" \
+     -d '{"categories": ["ticketing"]}'
+# open /link/<token> — GitHub Issues is listed with a LIVE badge
+
+curl -X POST localhost:8000/link/<token>/connect \
+     -d '{"integration": "github-issues", "end_user_name": "Eng",
+          "credential": "ghp_your_pat", "config": {"repo": "owner/name"}}'
+
+curl -X POST -H "Authorization: Bearer $DATA_KEY" \
+     localhost:8000/api/ticketing/v1/accounts/<public_token>/sync
+# -> real GitHub issues land as normalized Tickets (status, labels, assignee, body)
+```
+
+- The account's **own PAT** is used (or the platform `CONNEXA_GITHUB_TOKEN`); provider 401/404s become `SyncIssue` rows — **a failing real lane never fabricates data**
+- Provider field names (`state`, `labels`) ride along for field mappings; PRs are excluded automatically
+- Every simulated connector is badged `demo` on the link page — the honest/real boundary is always visible
+
+---
+
 ## Connectors
 
 | Slug | Lane | Credentials | Live data |
@@ -289,6 +347,7 @@ redacted and reported in the `connexa.dlp` envelope. Every action is audited.
 | `slack` | agent | `CONNEXA_SLACK_TOKEN` or OAuth / pasted bot token | live sends/channel lists |
 | `notion` | agent | `CONNEXA_NOTION_TOKEN` or OAuth / pasted token | live search/page create |
 | `github` | agent | `CONNEXA_GITHUB_TOKEN` or OAuth / pasted PAT | live issues/repo data |
+| `github-issues` | **link ticketing (REAL data lane)** | per-account PAT (link flow) or `CONNEXA_GITHUB_TOKEN` | **real repo issues → Ticket rows** |
 | `gmail` | agent | `CONNEXA_GMAIL_TOKEN` or Google OAuth / pasted token | live mailbox search + real sends |
 
 **Going live with real providers:** copy `.env.example` → `.env`, paste any of
@@ -376,7 +435,7 @@ connexa/
     config.py db.py models.py security.py metering.py utils.py
     common_models.py     # per-category Common Model + write-schema builder
     unified.py           # plane 1: data plane
-    link.py seed_data.py # plane 2: link flow + initial sync
+    link.py org_auth.py seed_data.py  # plane 2: link flow + self-serve SaaS + initial sync
     events.py            # webhook bus (HMAC raw-body, delivery receipts)
     agent/
       handler.py         # plane 3: agent REST (signup/packs/users/keys/rules/audit/search)
@@ -384,8 +443,9 @@ connexa/
     connectors/
       base.py sdk.py registry.py   # Connector interface, declarative SDK, registry
       free_live.py       # weather + wikipedia (no-cred live)
-      simulated.py       # jira/hubspot/helpdesk/salespod demo lane
+      simulated.py       # jira/hubspot/helpdesk/salespod demo lane (badged `demo`)
       real_slack.py real_notion.py real_github.py real_gmail.py
+      real_github_issues.py  # REAL ticketing data lane (GitHub issues -> Ticket)
     gateway/
       providers.py       # echo + openai + anthropic adapters
       api.py             # plane 4: chat/stream/policies/budgets
@@ -393,7 +453,8 @@ connexa/
     seed.py
   docs/
     connector-sdk.md     # add-a-connector guide (declarative + full-class recipes)
-  run.py requirements.txt .env.example Dockerfile docker-compose.yml
+  connector-sdk.md       # add-a-connector guide (declarative + full-class recipes)
+  run.py requirements.txt .env.example Dockerfile docker-compose.yml DEPLOY.md
   connexa.db             # SQLite (delete to re-seed)
 ```
 

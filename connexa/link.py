@@ -100,9 +100,26 @@ def link_page(token_value: str, request: Request, db: Session = Depends(get_db))
 class ConnectRequest(BaseModel):
     integration: str
     end_user_name: str = Field(min_length=1)
+    # Real-lane integrations: the end user's own provider credential + config.
+    credential: str | None = None          # e.g. a GitHub personal access token
+    config: dict = Field(default_factory=dict)   # e.g. {"repo": "owner/name"}
 
 
 RESPONSE_TOKENS: dict[str, str] = {}
+
+
+# Plan limits enforced at connect time (see /api/v1/billing for the surface).
+PLAN_LIMITS: dict[str, dict] = {
+    "free": {"linked_accounts": 3},
+    "growth": {"linked_accounts": 25},
+    "scale": {"linked_accounts": 1_000_000},
+}
+
+
+def _plan_limit_reached(db: Session, org: Org) -> tuple[bool, int]:
+    limit = PLAN_LIMITS.get(org.plan or "free", PLAN_LIMITS["free"])["linked_accounts"]
+    used = db.query(LinkedAccount).filter(LinkedAccount.org_id == org.id).count()
+    return used >= limit, limit
 
 
 @router.post("/{token_value}/connect")
@@ -114,16 +131,43 @@ def connect(token_value: str, data: ConnectRequest, background: BackgroundTasks,
     connector = registry.get(data.integration)
     if not connector:
         raise HTTPException(400, {"detail": f"'{data.integration}' is not a connectable integration."})
-    category = next((c for c in DATA_CATEGORIES if connector.generate_sample(c)), None)
-    if category is None:
-        raise HTTPException(400, {"detail": f"'{data.integration}' has no data-plane source."})
-    if category not in token.categories:
-        raise HTTPException(400, {"detail": f"Integration '{data.integration}' is outside this link token's categories."})
+    real_lane = bool(getattr(connector, "data_categories", []))
+    if real_lane:
+        category = next((c for c in token.categories if c in connector.data_categories), None)
+        if category is None:
+            raise HTTPException(400, {"detail": (f"Integration '{data.integration}' is outside this "
+                                                 f"link token's categories.")})
+        if not data.credential and not getattr(connector, "env_token", ""):
+            raise HTTPException(400, {"detail": (f"'{data.integration}' is a REAL integration — pass your "
+                                                 f"provider credential in 'credential'.")})
+        if not (data.config or {}).get("repo"):
+            raise HTTPException(400, {"detail": "A repository is required: config = {\"repo\": \"owner/name\"}."})
+    else:
+        category = next((c for c in DATA_CATEGORIES if connector.generate_sample(c)), None)
+        if category is None:
+            raise HTTPException(400, {"detail": f"'{data.integration}' has no data-plane source."})
+        if category not in token.categories:
+            raise HTTPException(400, {"detail": f"Integration '{data.integration}' is outside this link token's categories."})
+
+    org = db.get(Org, token.org_id)
+    limit_hit, limit = _plan_limit_reached(db, org)
+    if limit_hit:
+        raise HTTPException(402, {"error": {
+            "code": "plan_limit_reached",
+            "message": (f"The {org.plan} plan allows {limit} linked accounts. "
+                        f"Upgrade to connect more."),
+            "plan": org.plan, "limit": limit}})
+
+    credentials: dict = {}
+    if real_lane:
+        credentials = {"type": "user", "repo": data.config.get("repo")}
+        if data.credential:
+            credentials["token"] = data.credential
 
     account_token = new_token("cxt")
     account = LinkedAccount(id=uid(), org_id=token.org_id, category=category,
                             integration=connector.slug, end_user_name=data.end_user_name,
-                            account_token=account_token, credentials={})
+                            account_token=account_token, credentials=credentials)
     db.add(account)
 
     # Initial pull: provider -> Common Model sync (same engine as every later sync).

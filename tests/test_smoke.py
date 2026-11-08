@@ -621,3 +621,257 @@ def test_link_flow_customization(client):
     assert bad.status_code == 400, "accent_color must be #RRGGBB"
 
 
+# ---------------------------------------------------------------- v0.5: self-serve SaaS + real data lane
+
+def test_org_signup_login_plan_limits_billing(client):
+    """Anyone can become a tenant: signup -> live keys, plans enforced at connect
+    time (free = 3 linked accounts), login returns the account view, billing shows
+    real usage against real limits."""
+    signup = client.post("/api/v1/org/signup", json={
+        "email": "owner@nitestream.example", "password": "correct-horse-battery",
+        "company_name": "NiteStream"})
+    assert signup.status_code == 201
+    body = signup.json()
+    assert body["plan"] == "free" and body["slug"] == "nitestream"
+    assert body["data_api_key"].startswith("cxk_") and body["gateway_api_key"].startswith("cxg_")
+
+    # the new tenant's keys work immediately on the real data plane
+    headers = {"Authorization": f"Bearer {body['data_api_key']}"}
+    token = client.post("/api/link-tokens", json={"categories": ["ticketing"]},
+                        headers=headers)
+    assert token.status_code == 200, "a self-serve org must be able to mint link tokens"
+    token = token.json()["link_token"]
+
+    # connect 3 accounts (free limit) -> 4th refused with 402 plan_limit_reached
+    for i in range(3):
+        connected = client.post(f"/link/{token}/connect", json={
+            "integration": "helpdesk", "end_user_name": f"Tenant {i}"})
+        assert connected.status_code == 200, connected.text
+        assert client.post(f"/link/{token}/connect", json={
+            "integration": "helpdesk", "end_user_name": f"Reuse {i}"}).status_code == 410, \
+            "a link token is single-use"
+        token = client.post("/api/link-tokens", json={"categories": ["ticketing"]},
+                            headers=headers).json()["link_token"]
+
+    blocked = client.post(f"/link/{token}/connect", json={
+        "integration": "helpdesk", "end_user_name": "Overflow"})
+    assert blocked.status_code == 402
+    assert blocked.json()["detail"]["error"]["code"] == "plan_limit_reached"
+    assert blocked.json()["detail"]["error"]["limit"] == 3
+
+    # login: wrong password refused; right password returns the account view, keys masked
+    assert client.post("/api/v1/org/login", json={
+        "email": "owner@nitestream.example", "password": "wrong-password"}).status_code == 401
+    login = client.post("/api/v1/org/login", json={
+        "email": "owner@nitestream.example", "password": "correct-horse-battery"})
+    assert login.status_code == 200
+    login_body = login.json()
+    assert login_body["org"] == "NiteStream" and login_body["plan"] == "free"
+    masked = {k["masked"] for k in login_body["api_keys"]}
+    assert any(m.startswith("cxk_") for m in masked)
+    assert all(body["data_api_key"] not in m for m in masked), "full keys never come back on login"
+
+    # account view + billing: real usage against real limits
+    me = client.get("/api/v1/org/me", headers=headers)
+    assert me.status_code == 200
+    me_body = me.json()
+    assert me_body["linked_accounts"] == {"used": 3, "limit": 3}
+    assert me_body["plan"] == "free"
+
+    billing = client.get("/api/v1/org/billing", headers=headers)
+    assert billing.status_code == 200
+    billing_body = billing.json()
+    assert billing_body["plan"] == "free"
+    assert billing_body["limits"] == {"linked_accounts": 3}
+    assert billing_body["usage"]["linked_accounts"] == 3
+    assert billing_body["payments_configured"] is False, "no Stripe link configured in tests"
+    assert "upgrade" in billing_body["note"].lower()
+
+    dup = client.post("/api/v1/org/signup", json={
+        "email": "owner@nitestream.example", "password": "another-password-1",
+        "company_name": "NiteStream Two"})
+    assert dup.status_code == 409, "duplicate email refused"
+
+
+def test_github_issues_real_lane(client):
+    """The first REAL data lane: github-issues pulls live GitHub issues into the
+    Ticket Common Model. Mapping proven against a real GitHub payload shape (HTTP
+    stubbed), full sync path proven via a stubbed connector, and the link page
+    advertises it as LIVE."""
+    import httpx as _httpx
+
+    from connexa.connectors import real_github_issues as rgi
+    from connexa.connectors.base import Connector, RealPullError
+    from connexa.connectors.real_github_issues import GitHubIssuesConnector
+    from connexa.connectors.registry import registry
+
+    headers = {"Authorization": f"Bearer {_workforce_key(client)}"}
+
+    # ---- payload mapping: a real GitHub list-issues response -> Common Model rows
+    github_payload = [
+        {"number": 101, "title": "Login loop on Safari", "state": "open",
+         "assignee": {"login": "dana"}, "labels": [{"name": "bug"}, {"name": "priority:high"}],
+         "body": "Steps to reproduce...", "html_url": "https://github.com/o/r/issues/101",
+         "created_at": "2026-11-01T10:00:00Z"},
+        {"number": 102, "title": "Dark mode", "state": "closed", "assignee": None,
+         "labels": [], "body": None, "html_url": "https://github.com/o/r/issues/102",
+         "created_at": "2026-11-02T10:00:00Z"},
+        {"number": 103, "title": "A pull request", "state": "open", "pull_request": {"url": "x"},
+         "labels": [], "body": "not a ticket", "html_url": "u", "created_at": "2026-11-03T10:00:00Z"},
+    ]
+
+    class _FakeResponse:
+        status_code = 200
+        def __init__(self, payload):
+            self._payload = payload
+        def json(self):
+            return self._payload
+
+    calls = []
+
+    def _fake_get(url, headers=None, params=None, timeout=None):
+        calls.append((url, headers, params))
+        return _FakeResponse(github_payload)
+
+    original_get = rgi.httpx.get
+    rgi.httpx.get = _fake_get
+    try:
+        connector = GitHubIssuesConnector(env_token="platform-token")
+        rows = connector.pull_remote("ticketing", {"token": "ghp_user", "repo": "o/r"})
+        assert len(rows) == 2, "pull requests are not tickets"
+        first = next(r for r in rows if r["remote_id"] == "GH-101")
+        assert first["title"] == "Login loop on Safari"
+        assert first["status"] == "open" and first["state"] == "open"
+        assert first["assignee"] == "dana"
+        assert first["labels"] == ["bug", "priority:high"] and first["tags"] == ["bug", "priority:high"]
+        assert first["description"] == "Steps to reproduce..."
+        assert first["url"].endswith("/101")
+        closed = next(r for r in rows if r["remote_id"] == "GH-102")
+        assert closed["status"] == "closed"
+        assert calls[0][0].endswith("/repos/o/r/issues") and calls[0][2]["state"] == "all"
+        assert calls[0][1]["Authorization"] == "Bearer ghp_user", "the account's own credential wins"
+
+        # platform token used when the account has none
+        connector.pull_remote("ticketing", {"repo": "o/r"})
+        assert calls[-1][1]["Authorization"] == "Bearer platform-token"
+    finally:
+        rgi.httpx.get = original_get
+
+    # ---- error contract: never fabricate, always RealPullError
+    class _StatusResponse:
+        def __init__(self, status_code):
+            self.status_code = status_code
+        def json(self):
+            return []
+
+    for bad_credentials, api_status in [({"repo": "o/r"}, None),                      # no token anywhere
+                                        ({"token": "x", "repo": "o/r"}, 401),         # provider rejects
+                                        ({"token": "x", "repo": "just-a-name"}, None)]:  # malformed repo
+        if api_status:
+            rgi.httpx.get = lambda *a, _s=api_status, **k: _StatusResponse(_s)
+        try:
+            with pytest.raises(RealPullError):
+                GitHubIssuesConnector().pull_remote("ticketing", bad_credentials)
+        finally:
+            rgi.httpx.get = original_get
+
+    # ---- connect validation: a real lane demands credential + repo
+    token = client.post("/api/link-tokens", json={"categories": ["ticketing"]},
+                        headers=headers).json()["link_token"]
+    no_cred = client.post(f"/link/{token}/connect", json={
+        "integration": "github-issues", "end_user_name": "GH"})
+    assert no_cred.status_code == 400 and "credential" in no_cred.json()["detail"]["detail"]
+    cred_only = client.post(f"/link/{token}/connect", json={
+        "integration": "github-issues", "end_user_name": "GH", "credential": "ghp_x"})
+    assert cred_only.status_code == 400 and "repo" in cred_only.json()["detail"]["detail"]
+
+    # ---- the link page advertises the real lane as LIVE
+    page = client.get(f"/link/{client.post('/api/link-tokens', json={'categories': ['ticketing']},
+                                         headers=headers).json()['link_token']}")
+    assert page.status_code == 200
+    assert "GitHub Issues" in page.text and "LIVE" in page.text
+
+    # ---- full sync path through the real-lane branch of run_sync (stubbed pull)
+    class _StubGitHubIssues(Connector):
+        slug = "github-issues"
+        name = "GitHub Issues"
+        auth_type = "token"
+        real_lane_ready = True
+        data_categories = ["ticketing"]
+
+        def __init__(self, rows, fail=False):
+            super().__init__()
+            self._rows = rows
+            self._fail = fail
+
+        def build_tools(self):
+            return []
+
+        def generate_sample(self, category):
+            return []
+
+        def pull_remote(self, category, credentials):
+            if self._fail:
+                raise RealPullError("GitHub rejected the token (401)")
+            return self._rows
+
+    rows_for_sync = [
+        {"remote_id": "GH-101", "title": "Login loop on Safari", "status": "open",
+         "description": "Steps...", "type": "ticket"},
+        {"remote_id": "GH-102", "title": "Dark mode", "status": "closed",
+         "description": "", "type": "ticket"},
+    ]
+    stub = _StubGitHubIssues(rows_for_sync)
+    original_connector = registry._by_slug["github-issues"]
+    registry._by_slug["github-issues"] = stub
+    try:
+        sync_token = client.post("/api/link-tokens", json={"categories": ["ticketing"]},
+                                 headers=headers).json()["link_token"]
+        connected = client.post(f"/link/{sync_token}/connect", json={
+            "integration": "github-issues", "end_user_name": "GH",
+            "credential": "ghp_real", "config": {"repo": "o/r"}})
+        assert connected.status_code == 200, connected.text
+        public_token = connected.json()["public_token"]
+
+        summary = client.post(f"/api/ticketing/v1/accounts/{public_token}/sync", headers=headers)
+        assert summary.status_code == 200
+        body = summary.json()
+        assert body["integration"] == "github-issues"
+        # the connect flow already ran the initial sync (real pull) — an explicit
+        # re-sync must see the same rows as unchanged (idempotent, never duplicated)
+        assert body["added"] + body["unchanged"] == 2
+        assert body["counts"]["Ticket"] == 2
+        assert body["errors"] == 0
+
+        tickets = client.get("/api/ticketing/v1/tickets",
+                             headers={**headers, "X-Account-Token": public_token}).json()
+        assert tickets["count"] == 2, "real pull: exactly the stub rows, no fabricated extras"
+        titles = {t["title"] for t in tickets["results"]}
+        assert {"Login loop on Safari", "Dark mode"} <= titles
+
+        # provider breaks -> a sync issue is recorded and nothing is fabricated
+        stub._fail = True
+        summary = client.post(f"/api/ticketing/v1/accounts/{public_token}/sync", headers=headers).json()
+        assert summary["errors"] == 1 and summary["added"] == 0
+        issues = client.get("/api/ticketing/v1/issues", headers=headers).json()
+        assert any("real pull failed" in i["message"] for i in issues["issues"])
+
+        # a failing real pull DURING connect must still leave a usable (empty) account
+        fail_token = client.post("/api/link-tokens", json={"categories": ["ticketing"]},
+                                 headers=headers).json()["link_token"]
+        fail_conn = client.post(f"/link/{fail_token}/connect", json={
+            "integration": "github-issues", "end_user_name": "GH2",
+            "credential": "ghp_bad", "config": {"repo": "o/r"}})
+        assert fail_conn.status_code == 200
+        fail_pt = fail_conn.json()["public_token"]
+        fail_summary = client.post(f"/api/ticketing/v1/accounts/{fail_pt}/sync",
+                                   headers=headers).json()
+        assert fail_summary["errors"] == 1 and fail_summary["counts"] == {}
+        empty = client.get("/api/ticketing/v1/tickets",
+                           headers={**headers, "X-Account-Token": fail_pt}).json()
+        assert empty["count"] == 0, "the account survives a failed pull and holds nothing fabricated"
+    finally:
+        registry._by_slug["github-issues"] = original_connector
+
+
+

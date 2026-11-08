@@ -26,6 +26,17 @@ class Org(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+class OrgUser(Base):
+    """Self-serve tenant login (email + password) — the human owner of an org."""
+    __tablename__ = "org_users"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=uid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id"), index=True)
+    email: Mapped[str] = mapped_column(String(200), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(200))
+    display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
 class ApiKey(Base):
     __tablename__ = "api_keys"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)

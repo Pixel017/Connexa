@@ -11,14 +11,17 @@ from .utils import uid
 
 
 def seed(db: Session) -> dict:
-    existing = db.query(Org).filter(Org.kind == "core").first()
+    existing = db.query(Org).filter(Org.slug == settings.seed_org_slug).first()
     if existing:
+        if existing.plan != "scale":     # the demo org predates plans — never limit it
+            existing.plan = "scale"
+            db.commit()
         key = (db.query(ApiKey).filter(ApiKey.org_id == existing.id, ApiKey.is_test == True)  # noqa: E712
                .order_by(ApiKey.created_at).first())
         return {"org": existing, "demo_key": key.key_secret if key else None,
                 "gateway_key": _first_key(db, existing, "gateway")}
 
-    org = Org(id=uid(), name="Acme Inc", slug="acme-inc", kind="core", claimed=True)
+    org = Org(id=uid(), name="Acme Inc", slug="acme-inc", kind="core", claimed=True, plan="scale")
     db.add(org)
     db.flush()
 

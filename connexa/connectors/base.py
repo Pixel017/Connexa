@@ -23,6 +23,11 @@ class OAuthExchangeError(Exception):
     """Raised when a provider rejects an authorization-code (or refresh) exchange."""
 
 
+class RealPullError(Exception):
+    """Raised by a real-lane pull when the provider rejects or the credentials are
+    insufficient — run_sync records it as a SyncIssue instead of fabricating data."""
+
+
 @dataclass
 class ToolSpec:
     """One agent-callable tool. Schema style: a single {"input": {...}} indirection
@@ -83,6 +88,11 @@ class Connector:
     description: str = ""
     auth_type: str = "token"     # none | token | oauth (set dynamically by configure_oauth)
     real_lane_ready: bool = False  # True when a real provider token is configured
+
+    # Real data-plane categories (real-lane connectors only). When non-empty the
+    # connector can back a LinkedAccount in those categories by implementing
+    # pull_remote() — real provider pulls, no simulated samples.
+    data_categories: list = []
 
     # --- OAuth 2.0 configuration (populated per connector via configure_oauth) ----------
     oauth_client_id: str = ""

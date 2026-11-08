@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
+from .connectors.base import RealPullError
 from .connectors.registry import registry
 from .events import emit
 from .metering import audit, usage
@@ -191,7 +192,25 @@ def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | 
              "counts": {model: n}, "skipped", "errors", "synced_at"}.
     """
     connector = registry.require(account.integration)
-    rows = connector.generate_sample(account.category) or []
+    if (connector.real_lane_ready and getattr(connector, "data_categories", None)
+            and account.category in connector.data_categories):
+        # REAL data lane: pull live provider data with the account's credentials.
+        try:
+            rows = connector.pull_remote(account.category, account.credentials or {}) or []
+        except RealPullError as error:
+            # No rollback here: the caller may have uncommitted state it must keep
+            # (connect's pending LinkedAccount insert). Record the issue and commit —
+            # the account survives, stays empty, and the failure is visible.
+            db.add(SyncIssue(id=uid(), org_id=account.org_id, linked_account_id=account.id,
+                             model="sync", severity="error", message=f"real pull failed: {error}"))
+            db.commit()
+            audit(db, event_type="SYNC_ISSUE", org_id=account.org_id, actor=actor,
+                  description=f"{account.integration}: {str(error)[:120]}")
+            return {"integration": account.integration, "category": account.category,
+                    "added": 0, "updated": 0, "unchanged": 0, "counts": {},
+                    "skipped": 0, "errors": 1, "synced_at": iso(now())}
+    else:
+        rows = connector.generate_sample(account.category) or []
     wanted = _WANTED[account.category]
 
     settings = account.settings or {}
@@ -215,9 +234,9 @@ def run_sync(db: Session, account: LinkedAccount, background: BackgroundTasks | 
             continue
         loader = _LOADER[row_type]
         try:
-            verdict = loader(db, account, _apply_field_mappings(account, model, row))
+            with db.begin_nested():        # savepoint: a bad row must not discard the caller's pending state
+                verdict = loader(db, account, _apply_field_mappings(account, model, row))
         except Exception as error:  # noqa: BLE001 — record and keep syncing
-            db.rollback()
             errors += 1
             db.add(SyncIssue(id=uid(), org_id=account.org_id, linked_account_id=account.id,
                              model=model, severity="error",

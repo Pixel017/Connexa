@@ -17,6 +17,7 @@ from .gateway.api import router as gateway_router
 from .dashboard.routes import router as dashboard_router
 from .oauth_routes import router as oauth_router
 from .workforce import router as workforce_router, scim_router
+from .org_auth import router as org_auth_router
 from . import scheduler
 
 app = FastAPI(
@@ -47,6 +48,7 @@ app.include_router(mcp_router)
 app.include_router(gateway_router)
 app.include_router(workforce_router)
 app.include_router(scim_router)
+app.include_router(org_auth_router)
 
 
 @app.get("/healthz")
@@ -64,8 +66,10 @@ Connexa is a self-contained business connectivity platform. Five planes in one p
   (Common Models: Ticket | Contact, Deal | Employee | Invoice)
 - Link flow: POST /api/link-tokens (connect a linked account via the browser)
 - Agent Handler: POST /api/v1/agent/signup/ (self-serve agent bootstrap, MCP surface)
+- Self-serve SaaS: POST /api/v1/org/signup (email+password -> live keys; free plan enforced)
 - Gateway: /v1/chat/completions (OpenAI-compatible model routing; X-Connexa-Team for workforce teams)
 - Workforce: /api/workforce/v1/teams|skills|memories + SCIM 2.0 at /scim/v2/Users|Groups
+- REAL data lane: "github-issues" connector syncs real GitHub repo issues -> Ticket (PAT + repo config)
 
 Connectors (starter tool pack): weather, wikipedia, jira, slack, notion, github, gmail, helpdesk.
 Every connector exposes authenticate_<slug> (sign-in) + <slug>__validate_credential; tools called
@@ -98,6 +102,13 @@ Field mappings: GET/PUT /api/{category}/v1/accounts/{public_token}/field-mapping
   (applied by the sync engine, then re-synced; GET .../field-mappings/suggestions lists unmapped provider fields)
 Webhook deliveries retry with exponential backoff (30s/2m/10m, 4 attempts) — failures are never silent
 Link flow customization: create link tokens with company_name, logo_url, accent_color, welcome_text
+
+## Self-serve SaaS (org accounts)
+POST /api/v1/org/signup {"email", "password", "company_name"} -> creates tenant + data/gateway keys (shown once)
+POST /api/v1/org/login {"email", "password"} -> account view (masked keys)
+GET  /api/v1/org/me (data key) -> plan, linked-account usage vs limit, credits
+GET  /api/v1/org/billing (data key) -> plan limits + upgrade_url (CONNEXA_STRIPE_PAYMENT_LINK when set)
+Free plan enforces 3 linked accounts at connect time (402 plan_limit_reached)
 
 ## Workforce plane (teams / SCIM / skills / memory)
 POST /api/workforce/v1/teams {"name", "allowed_models", "monthly_credit_budget", "tool_pack_id"}
