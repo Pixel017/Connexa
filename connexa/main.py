@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .db import init_db, SessionLocal
 from .site.routes import router as site_router
 from .unified import router as unified_router
+from .wideplane import router as wideplane_router
 from .link import router as link_router, api_router as link_api_router
 from .agent.handler import router as agent_router
 from .agent.mcp import router as mcp_router
@@ -43,6 +44,7 @@ app.include_router(link_router)
 app.include_router(link_api_router)
 app.include_router(oauth_router)
 app.include_router(unified_router)
+app.include_router(wideplane_router)
 app.include_router(agent_router)
 app.include_router(mcp_router)
 app.include_router(gateway_router)
@@ -61,9 +63,9 @@ _llms = """# Connexa
 Connexa is a self-contained business connectivity platform. Five planes in one process:
 
 - llms-full.txt for machine-readable endpoint docs
-- /docs for the OpenAPI UI
-- Data plane: /api/{ticketing,crm,hris,accounting}/v1/... with Bearer data key + X-Account-Token
-  (Common Models: Ticket | Contact, Deal | Employee | Invoice)
+- /docs for the OpenAPI UI; /features for the live feature registry (status + proof per feature)
+- Data plane: /api/{ticketing,crm,hris,accounting,ats,filestorage}/v1/... with Bearer data key + X-Account-Token
+  (Common Models: Ticket | Contact, Deal | Employee | Invoice | Candidate | File, Folder)
 - Link flow: POST /api/link-tokens (connect a linked account via the browser)
 - Agent Handler: POST /api/v1/agent/signup/ (self-serve agent bootstrap, MCP surface)
 - Self-serve SaaS: POST /api/v1/org/signup (email+password -> live keys; free plan enforced)
@@ -93,7 +95,9 @@ POST /api/link-tokens -> open returned /link/{token} in a browser -> connect (in
 POST /api/{category}/v1/account-token/{public_token}
 POST /api/{category}/v1/accounts/{public_token}/sync -> on-demand idempotent sync (added/updated/unchanged + counts)
 GET/POST/PATCH /api/ticketing/v1/tickets ; /api/crm/v1/contacts ; /api/crm/v1/deals
-GET /api/ticketing/v1/meta/write-schema before writes; POST /api/ticketing/v1/passthrough for raw provider calls
+GET/POST/PATCH /api/hris/v1/employees ; /api/accounting/v1/invoices ; /api/ats/v1/candidates
+GET/POST/PATCH /api/filestorage/v1/files ; GET /api/filestorage/v1/folders
+GET /api/{category}/v1/meta/write-schema before writes; POST /api/ticketing/v1/passthrough for raw provider calls
 POST /api/{category}/v1/accounts/{public_token}/sync-frequency -> {"seconds": N} scheduled background sync (0 = manual)
 GET  /api/{category}/v1/issues -> open sync issues (health surface)
 DELETE /api/{category}/v1/accounts/{public_token} -> erasure: remove account + all derived rows
@@ -102,6 +106,8 @@ Field mappings: GET/PUT /api/{category}/v1/accounts/{public_token}/field-mapping
   (applied by the sync engine, then re-synced; GET .../field-mappings/suggestions lists unmapped provider fields)
 Webhook deliveries retry with exponential backoff (30s/2m/10m, 4 attempts) — failures are never silent
 Link flow customization: create link tokens with company_name, logo_url, accent_color, welcome_text
+Audit trail: GET /api/v1/audit-log/ (JSON) and GET /api/v1/audit-log/export (CSV, org-scoped)
+Public feature registry: GET /features — every claimed feature lists live/roadmap status + proof
 
 ## Self-serve SaaS (org accounts)
 POST /api/v1/org/signup {"email", "password", "company_name"} -> creates tenant + data/gateway keys (shown once)

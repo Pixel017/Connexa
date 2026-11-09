@@ -10,6 +10,7 @@ from .real_gmail import GmailConnector
 from .real_github import GitHubConnector
 from .simulated import (JiraToolsConnector, HubSpotLikeConnector, HelpdeskLikeConnector,
                         SalespodLikeConnector, PeopleOsConnector, LedgerlyConnector)
+from .simulated_wide import HirePodConnector, VaultfileConnector
 from .real_github_issues import GitHubIssuesConnector
 from ..common_models import DATA_CATEGORIES
 
@@ -26,6 +27,8 @@ class ConnectorRegistry:
             SalespodLikeConnector(),
             PeopleOsConnector(),
             LedgerlyConnector(),
+            HirePodConnector(),
+            VaultfileConnector(),
             GitHubIssuesConnector(env_token=settings.github_token,
                                   api_base=settings.github_api_base),
             SlackConnector(settings.slack_token, settings.slack_oauth),

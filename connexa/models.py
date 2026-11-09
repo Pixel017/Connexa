@@ -175,6 +175,57 @@ class Invoice(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+class Candidate(Base):
+    """ATS Common Model — the normalized job candidate."""
+    __tablename__ = "candidates"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    linked_account_id: Mapped[str] = mapped_column(ForeignKey("linked_accounts.id"), index=True)
+    remote_id: Mapped[str] = mapped_column(String(60))
+    first_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    current_company: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    location: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    application_status: Mapped[str] = mapped_column(String(40), default="applied")
+    recruiter_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    remote_extra: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class FileRow(Base):
+    """File Storage Common Model — the normalized file record."""
+    __tablename__ = "files"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    linked_account_id: Mapped[str] = mapped_column(ForeignKey("linked_accounts.id"), index=True)
+    remote_id: Mapped[str] = mapped_column(String(60))
+    name: Mapped[str] = mapped_column(String(240))
+    mime_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    size_bytes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    folder: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    remote_extra: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class Folder(Base):
+    """File Storage Common Model — the normalized folder record."""
+    __tablename__ = "folders"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    linked_account_id: Mapped[str] = mapped_column(ForeignKey("linked_accounts.id"), index=True)
+    remote_id: Mapped[str] = mapped_column(String(60))
+    name: Mapped[str] = mapped_column(String(240))
+    parent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    remote_extra: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
 # ---------------------------------------------------------------- webhooks
 
 class WebhookEndpoint(Base):

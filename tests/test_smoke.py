@@ -88,11 +88,105 @@ def test_marketing_site_pages(client):
     assert landing.status_code == 200
     assert "Connexa" in landing.text and "Agent Handler" in landing.text
     for path in ("/unified", "/agent-handler", "/gateway", "/workforce",
-                 "/pricing", "/security", "/integrations"):
+                 "/pricing", "/security", "/integrations", "/features"):
         response = client.get(path)
         assert response.status_code == 200, f"{path} must render"
     assert "Common Model" in client.get("/unified").text
     assert "SOC 2" in client.get("/security").text          # honest roadmap, present in copy
+    features = client.get("/features").text
+    assert "Field mappings" in features and "roadmap" in features      # honest registry renders
+
+
+def test_ats_and_filestorage_categories(client):
+    """New categories: link -> initial sync -> list/get/create/patch on Candidate,
+    File, Folder — plus a real field-mapping renames applied by the sync engine."""
+    headers = {"Authorization": f"Bearer {_workforce_key(client)}"}
+
+    token = client.post("/api/link-tokens", json={"categories": ["ats", "filestorage"]},
+                        headers=headers).json()["link_token"]
+    pt_ats = client.post(f"/link/{token}/connect",
+                         json={"integration": "hirepod", "end_user_name": "Recruiting"}
+                         ).json()["public_token"]
+    token2 = client.post("/api/link-tokens", json={"categories": ["filestorage"]},
+                         headers=headers).json()["link_token"]
+    pt_files = client.post(f"/link/{token2}/connect",
+                           json={"integration": "vaultfile", "end_user_name": "Docs"}).json()["public_token"]
+
+    # --- ATS: synced candidates -------------------------------------------------
+    candidates = client.get("/api/ats/v1/candidates",
+                            headers={**headers, "X-Account-Token": pt_ats}).json()
+    assert candidates["count"] >= 5 and candidates["results"][0]["first_name"]
+    cand_id = candidates["results"][0]["id"]
+    one = client.get(f"/api/ats/v1/candidates/{cand_id}",
+                     headers={**headers, "X-Account-Token": pt_ats}).json()
+    assert one["id"] == cand_id and one["remote_data"]
+
+    created = client.post("/api/ats/v1/candidates",
+                          headers={**headers, "X-Account-Token": pt_ats},
+                          json={"first_name": "Ana", "last_name": "Moreno",
+                                "application_status": "screening", "tags": ["python"]})
+    assert created.status_code == 201 and created.json()["application_status"] == "screening"
+
+    patched = client.patch(f"/api/ats/v1/candidates/{created.json()['id']}",
+                           headers={**headers, "X-Account-Token": pt_ats},
+                           json={"application_status": "offer"})
+    assert patched.status_code == 200 and patched.json()["application_status"] == "offer"
+
+    bad = client.post("/api/ats/v1/candidates", headers={**headers, "X-Account-Token": pt_ats},
+                      json={"first_name": "Ana", "application_status": "gig"})
+    assert bad.status_code == 400, "enum values validated on write"
+
+    schema = client.get("/api/ats/v1/meta/write-schema", headers=headers).json()
+    assert schema["Candidate"]["fields"]["application_status"]["values"][0] == "applied"
+
+    # --- ATS field mappings: provider names -> Common Model (engine re-applies) --
+    mapped = client.put(f"/api/ats/v1/accounts/{pt_ats}/field-mappings", headers=headers, json={
+        "mappings": {"Candidate": {"job_title": "role", "office": "location",
+                                   "stage": "application_status"}}})
+    assert mapped.status_code == 200
+    after = client.get("/api/ats/v1/candidates",
+                       headers={**headers, "X-Account-Token": pt_ats}).json()
+    roles = {r["role"] for r in after["results"]}
+    assert "Senior Backend Engineer" in roles
+    statuses = {r["application_status"] for r in after["results"]}
+    assert "interview" in statuses and "hired" in statuses
+
+    # --- File Storage: folders + files -------------------------------------------
+    files = client.get("/api/filestorage/v1/files",
+                       headers={**headers, "X-Account-Token": pt_files}).json()
+    assert files["count"] >= 3
+    names = {r["name"] for r in files["results"]}
+    assert "architecture.md" in names
+    assert files["results"][0]["remote_data"]
+
+    folders = client.get("/api/filestorage/v1/folders",
+                         headers={**headers, "X-Account-Token": pt_files}).json()
+    assert folders["count"] >= 2
+    assert {f["name"] for f in folders["results"]} >= {"Engineering", "Specs"}
+
+    created_file = client.post("/api/filestorage/v1/files",
+                               headers={**headers, "X-Account-Token": pt_files},
+                               json={"name": "runbook.md", "mime_type": "text/markdown",
+                                     "folder": "/Engineering", "tags": ["ops"]})
+    assert created_file.status_code == 201 and created_file.json()["name"] == "runbook.md"
+
+    schema_fs = client.get("/api/filestorage/v1/meta/write-schema", headers=headers).json()
+    assert schema_fs["File"]["fields"]["name"]["required_on_create"] is True
+    assert "size_bytes" in schema_fs["File"]["read_only"]
+
+
+def test_audit_log_export_csv(client):
+    """Org-scoped audit trail exports as downloadable CSV (compliance artifact)."""
+    signup = client.post("/api/v1/agent/signup/").json()
+    headers = {"Authorization": f"Bearer {signup['api_key']}"}
+
+    export = client.get("/api/v1/audit-log/export", headers=headers)
+    assert export.status_code == 200
+    assert export.headers["content-type"].startswith("text/csv")
+    lines = export.text.splitlines()
+    assert lines[0] == "ts,event_type,actor,ip,description"
+    assert len(lines) >= 2, "signup itself must have audited at least one event"
+    assert "AGENT_SIGNUP" in export.text
 
 
 def test_dashboard_accounts_and_audit_require_login(client):

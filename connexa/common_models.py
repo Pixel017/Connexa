@@ -8,8 +8,9 @@ DEAL_STAGES = ["prospecting", "proposal", "negotiation", "won", "lost"]
 CONTACT_STAGES = ["lead", "qualified", "customer", "unqualified"]
 EMPLOYEE_TYPES = ["full_time", "part_time", "contractor", "intern"]
 INVOICE_STATUSES = ["draft", "submitted", "paid", "void"]
+CANDIDATE_STATUSES = ["applied", "screening", "interview", "offer", "hired", "rejected"]
 
-DATA_CATEGORIES = ("ticketing", "crm", "hris", "accounting")
+DATA_CATEGORIES = ("ticketing", "crm", "hris", "accounting", "ats", "filestorage")
 
 COMMON_MODELS: dict[str, dict[str, Any]] = {
     "ticketing": {
@@ -75,6 +76,45 @@ COMMON_MODELS: dict[str, dict[str, Any]] = {
                 "issue_date": {"type": "string", "required_on_create": False},
                 "due_date": {"type": "string", "required_on_create": False},
                 "memo": {"type": "string", "required_on_create": False},
+            },
+            "read_only": ["id", "remote_id", "created_at", "updated_at", "remote_data"],
+        },
+    },
+    "ats": {
+        "models": ["Candidate"],
+        "Candidate": {
+            "fields": {
+                "first_name": {"type": "string", "required_on_create": True},
+                "last_name": {"type": "string", "required_on_create": False},
+                "email": {"type": "string", "required_on_create": False},
+                "current_company": {"type": "string", "required_on_create": False},
+                "role": {"type": "string", "required_on_create": False},
+                "location": {"type": "string", "required_on_create": False},
+                "application_status": {"type": "enum", "values": CANDIDATE_STATUSES,
+                                       "required_on_create": False},
+                "recruiter": {"type": "string", "required_on_create": False},
+                "notes": {"type": "string", "required_on_create": False},
+                "tags": {"type": "array[string]", "required_on_create": False},
+            },
+            "read_only": ["id", "remote_id", "created_at", "updated_at", "remote_data"],
+        },
+    },
+    "filestorage": {
+        "models": ["File", "Folder"],
+        "File": {
+            "fields": {
+                "name": {"type": "string", "required_on_create": True},
+                "mime_type": {"type": "string", "required_on_create": False},
+                "folder": {"type": "string", "required_on_create": False},
+                "tags": {"type": "array[string]", "required_on_create": False},
+            },
+            "read_only": ["id", "remote_id", "size_bytes", "uploaded_by",
+                          "created_at", "updated_at", "remote_data"],
+        },
+        "Folder": {
+            "fields": {
+                "name": {"type": "string", "required_on_create": False},
+                "parent": {"type": "string", "required_on_create": False},
             },
             "read_only": ["id", "remote_id", "created_at", "updated_at", "remote_data"],
         },

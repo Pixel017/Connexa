@@ -7,7 +7,7 @@
 
 **A unified business connectivity platform in one process** — original code implementing the four architectural pillars of a commercial "unified API" product:
 
-1. **Unified data plane** — one normalized Common Model per category (Ticketing, CRM), backed by any connected provider
+1. **Unified data plane** — one normalized Common Model per category (Ticketing, CRM, HRIS, Accounting, ATS, File Storage), backed by any connected provider
 2. **Link flow** — short-lived link tokens + an end-user connection screen handing back a public token
 3. **Agent Handler** — self-serve agent orgs, tool packs, an MCP tool server, and a security gateway
 4. **Gateway** — an OpenAI-compatible LLM router with routing policies, failover, budgets, and credit metering
@@ -101,7 +101,10 @@ Key endpoints:
 | `DELETE /api/{cat}/v1/accounts/{public_token}` | **erasure**: removes the account and every derived row |
 | `GET  /api/linked-accounts` | inventory of connected accounts |
 
-Categories today: **ticketing** (`Ticket`) and **crm** (`Contact`, `Deal`). Writes are validated against the Common Model — wrong enum values get a 400 with the allowed choices in the body.
+Categories today: **ticketing** (`Ticket`), **crm** (`Contact`, `Deal`), **hris** (`Employee`),
+**accounting** (`Invoice`), **ats** (`Candidate`), **filestorage** (`File`, `Folder`) — six public
+unified categories. Writes are validated against the Common Model — wrong enum values get a 400
+with the allowed choices in the body.
 
 ### 2. Link flow (`/link/...`)
 
@@ -225,8 +228,8 @@ curl -X POST localhost:8000/v1/chat/completions -H "Authorization: Bearer $GATEW
 
 ## Categories & Common Models
 
-Four data categories ship in one process, each with a normalized Common Model contract
-(`GET /api/{cat}/v1/meta/write-schema` before writes):
+Six data categories ship in one process (the full public unified set), each with a normalized
+Common Model contract (`GET /api/{cat}/v1/meta/write-schema` before writes):
 
 | Category | Common Models | Starter connectors (data plane) |
 |---|---|---|
@@ -234,9 +237,12 @@ Four data categories ship in one process, each with a normalized Common Model co
 | CRM | `Contact`, `Deal` | hubspot, salespod |
 | HRIS | `Employee` | peopleos |
 | Accounting | `Invoice` | ledgerly |
+| ATS | `Candidate` | hirepod |
+| File Storage | `File`, `Folder` | vaultfile |
 
 Every category gets the full data-plane surface automatically: link → initial sync →
-list/get/create → sync schedule → issues → erasure → field scopes → passthrough-ready.
+list/get/create/patch → sync schedule → issues → erasure → field scopes.
+A live, proof-backed feature registry (with roadmap items labeled honestly) is at **/features**.
 
 ## Field mappings (per account)
 
@@ -463,7 +469,7 @@ Original code throughout — the platform reimplements *architectural patterns* 
 ## Roadmap candidates
 
 - Grow the live connector set (Calendar, Drive, HubSpot, Jira, Stripe …) — mostly `RestCall` declarations now that the SDK exists
-- More categories (ATS, File Storage) — the Common Model + adapter pattern is proven by HRIS/Accounting
+- More categories' real lanes (ATS, File Storage real providers) — the Common Model + adapter pattern is proven by HRIS/Accounting and the REAL github-issues lane
 - Per-registered-user credential vault; prebuilt Okta / Entra SCIM connectors
 - Streaming-response DLP (non-streaming responses redacted today)
 - Cross-process job queue for multi-worker deployments

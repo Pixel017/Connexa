@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db
 from ..common_models import DATA_CATEGORIES
 from ..connectors.registry import registry
+from ..features import FEATURES, counts
 
 router = APIRouter(tags=["site"])
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -145,6 +146,13 @@ def landing(request: Request):
     connectors = [{"slug": c.slug, "name": c.name, "real": c.real_lane_ready}
                   for c in registry.list_connectors()]
     return _page(request, "landing.html", {"connectors": connectors})
+
+
+@router.get("/features", include_in_schema=False)
+def features_page(request: Request):
+    live, roadmap = counts()
+    return _page(request, "features.html",
+                 {"groups": FEATURES, "live": live, "roadmap": roadmap})
 
 
 @router.get("/unified", include_in_schema=False)

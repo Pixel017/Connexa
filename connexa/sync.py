@@ -15,7 +15,8 @@ from .connectors.base import RealPullError
 from .connectors.registry import registry
 from .events import emit
 from .metering import audit, usage
-from .models import Contact, Deal, Employee, Invoice, LinkedAccount, SyncIssue, Ticket
+from .models import (Candidate, Contact, Deal, Employee, FileRow, Folder, Invoice,
+                     LinkedAccount, SyncIssue, Ticket)
 from .utils import iso, now, uid
 
 
@@ -152,14 +153,89 @@ def _upsert_deal(db: Session, account: LinkedAccount, row: dict) -> str:
     return "updated" if changed else "unchanged"
 
 
+def _upsert_candidate(db: Session, account: LinkedAccount, row: dict) -> str:
+    """ATS: provider candidate payload -> normalized Candidate row."""
+    remote_id = str(row.get("remote_id") or "CAN-0")
+    remote_extra = _remote_extra(account, row)
+    data = dict(
+        first_name=row.get("first_name"),
+        last_name=row.get("last_name"),
+        email=row.get("email"),
+        current_company=row.get("current_company"),
+        role=row.get("role"),
+        location=row.get("location"),
+        application_status=row.get("application_status") or "applied",
+        recruiter_name=row.get("recruiter"),
+        notes=row.get("notes"),
+        tags=row.get("tags") or [],
+    )
+    existing = (db.query(Candidate)
+                .filter(Candidate.linked_account_id == account.id, Candidate.remote_id == remote_id)
+                .one_or_none())
+    if existing is None:
+        db.add(Candidate(id=uid(), linked_account_id=account.id, remote_id=remote_id,
+                         remote_extra=remote_extra, **data))
+        return "added"
+    changed = _apply(existing, data)
+    existing.remote_extra = remote_extra
+    return "updated" if changed else "unchanged"
+
+
+def _upsert_file(db: Session, account: LinkedAccount, row: dict) -> str:
+    """File Storage: provider file payload -> normalized File row."""
+    remote_id = str(row.get("remote_id") or "FILE-0")
+    remote_extra = _remote_extra(account, row)
+    data = dict(
+        name=row.get("name") or "Untitled",
+        mime_type=row.get("mime_type") or row.get("content_type"),
+        size_bytes=row.get("size_bytes") if row.get("size_bytes") is not None else row.get("size"),
+        folder=row.get("folder") or row.get("path"),
+        uploaded_by=row.get("uploaded_by") or row.get("owner"),
+        tags=row.get("tags") or [],
+    )
+    existing = (db.query(FileRow)
+                .filter(FileRow.linked_account_id == account.id, FileRow.remote_id == remote_id)
+                .one_or_none())
+    if existing is None:
+        db.add(FileRow(id=uid(), linked_account_id=account.id, remote_id=remote_id,
+                       remote_extra=remote_extra, **data))
+        return "added"
+    changed = _apply(existing, data)
+    existing.remote_extra = remote_extra
+    return "updated" if changed else "unchanged"
+
+
+def _upsert_folder(db: Session, account: LinkedAccount, row: dict) -> str:
+    """File Storage: provider folder payload -> normalized Folder row."""
+    remote_id = str(row.get("remote_id") or "FOLDER-0")
+    remote_extra = _remote_extra(account, row)
+    data = dict(
+        name=row.get("name") or "Untitled",
+        parent=row.get("parent") or row.get("path"),
+    )
+    existing = (db.query(Folder)
+                .filter(Folder.linked_account_id == account.id, Folder.remote_id == remote_id)
+                .one_or_none())
+    if existing is None:
+        db.add(Folder(id=uid(), linked_account_id=account.id, remote_id=remote_id,
+                      remote_extra=remote_extra, **data))
+        return "added"
+    changed = _apply(existing, data)
+    existing.remote_extra = remote_extra
+    return "updated" if changed else "unchanged"
+
+
 _LOADER = {"ticket": _upsert_ticket, "contact": _upsert_contact, "deal": _upsert_deal,
-           "employee": _upsert_employee, "invoice": _upsert_invoice}
+           "employee": _upsert_employee, "invoice": _upsert_invoice,
+           "candidate": _upsert_candidate, "file": _upsert_file, "folder": _upsert_folder}
 
 _MODEL_NAMES = {"ticket": "Ticket", "contact": "Contact", "deal": "Deal",
-                "employee": "Employee", "invoice": "Invoice"}
+                "employee": "Employee", "invoice": "Invoice",
+                "candidate": "Candidate", "file": "File", "folder": "Folder"}
 
 _WANTED = {"ticketing": ("ticket",), "crm": ("contact", "deal"),
-           "hris": ("employee",), "accounting": ("invoice",)}
+           "hris": ("employee",), "accounting": ("invoice",),
+           "ats": ("candidate",), "filestorage": ("folder", "file")}
 
 
 def _apply_field_mappings(account: LinkedAccount, model: str, row: dict) -> dict:

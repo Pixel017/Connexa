@@ -6,9 +6,11 @@ Everything else requires an agent-scoped Bearer key.
 """
 from __future__ import annotations
 
+import csv
 import datetime
+import io
 import re
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -352,6 +354,25 @@ def audit_log(auth=Depends(agent_key), db: Session = Depends(get_db)):
     return {"count": len(rows), "events": [
         {"event_type": r.event_type, "description": r.description, "actor": r.actor, "ts": iso(r.ts),
          "ip": r.ip} for r in rows]}
+
+
+@router.get("/audit-log/export")
+def audit_log_export(auth=Depends(agent_key), db: Session = Depends(get_db)):
+    """Org-scoped audit trail as CSV (downloadable compliance artifact)."""
+    key, org = auth
+    rows = (db.query(AuditEntry)
+            .filter(AuditEntry.agent_org_id == org.id)
+            .order_by(AuditEntry.ts.desc()).limit(5000).all())
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["ts", "event_type", "actor", "ip", "description"])
+    for row in rows:
+        writer.writerow([iso(row.ts), row.event_type, row.actor or "", row.ip or "",
+                         (row.description or "").replace("\n", " ")[:500]])
+    audit(db, event_type="AUDIT_EXPORTED", org_id=None, agent_org_id=org.id,
+          description=f"exported {len(rows)} audit rows as CSV")
+    return Response(content=buffer.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="connexa-audit-log.csv"'})
 
 # ---------------------------------------------------------------- stored credentials (paste-token lane)
 

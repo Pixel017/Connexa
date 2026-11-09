@@ -1,0 +1,51 @@
+{% extends "site_base.html" %}
+{% block title %}Features — Connexa{% endblock %}
+{% block body %}
+<section style="padding-top:64px;">
+  <span class="eyebrow">Feature registry</span>
+  <h1 style="font-size:42px; margin:12px 0 14px; max-width:760px;">Every feature we claim, with its proof</h1>
+  <p class="sec-sub" style="font-size:17.5px;">
+    <b>{{ live }}</b> features are live in this repository right now — each one lists the endpoints
+    or behavior that proves it. <b>{{ roadmap }}</b> more are on the public roadmap and labeled as
+    such. Nothing here is marketing vapor: clone the repo and verify every green line yourself.
+  </p>
+  <div class="chiprow">
+    <span class="chip"><b>{{ live }}</b> live</span>
+    <span class="chip"><b>{{ roadmap }}</b> roadmap</span>
+    <span class="chip"><b>6 / 6</b> public unified categories</span>
+  </div>
+</section>
+
+{% for group in groups %}
+<section {% if not loop.first %}class="tight"{% endif %}>
+  <span class="eyebrow">{{ "0%d" | format(loop.index) }}</span>
+  <h2 class="sec">{{ group.name }}</h2>
+  <p class="sec-sub">{{ group.blurb }}</p>
+  <table class="cmp">
+    <tr><th style="width:52%;">Feature</th><th style="width:14%;">Status</th><th>Proof</th></tr>
+    {% for item in group["items"] %}
+    <tr>
+      <td>{{ item["name"] }}</td>
+      <td>{% if item["status"] == "live" %}<span class="pill-ok">live</span>
+          {% else %}<span class="pill-dev">roadmap</span>{% endif %}</td>
+      <td style="text-align:left; font-size:12.5px;">
+        {% if item["proof"] %}<code>{{ item["proof"] }}</code>{% else %}<span class="muted">—</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endfor %}
+
+<section class="tight">
+  <div class="cta-band">
+    <h2>Don't take the table's word for it</h2>
+    <p>Run the platform, hit the endpoints, watch the audit trail fill up. The proof column is
+       executable — that's the point.</p>
+    <div style="margin-top:18px;">
+      <a class="btn light" href="/docs">Try every endpoint</a>
+      <a class="btn ghost" href="https://github.com/Pixel017/Connexa" style="margin-left:10px;">Clone the source ↗</a>
+    </div>
+  </div>
+</section>
+{% endblock %}
