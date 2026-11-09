@@ -2,24 +2,185 @@
 {% block title %}Connexa — the business context engine for AI agents and products{% endblock %}
 {% block body %}
 
-<div class="hero">
-  <span class="eyebrow">Unified · Agent Handler · Gateway · Workforce</span>
-  <h1>Connect your product — and your agents — to every system the business runs on</h1>
-  <p class="sub">Connexa is a business connectivity platform in <b>one Python process</b>: a Common Model data
-     plane, a hosted link flow, an MCP tool server with OAuth, and an LLM gateway. Self-hostable. MIT licensed.</p>
-  <a class="btn dark" href="/dashboard">Start in the console</a>
-  <a class="btn ghost" href="/unified" style="margin-left:10px;">See how it works</a>
+{% set marquee_static = ["MCP native", "OpenAI-compatible", "SCIM 2.0", "HMAC-signed webhooks",
+                         "Docker one-command", "SQLite → Postgres-ready", "MIT licensed",
+                         "your data on your disk"] %}
+{% set diagram_right = [( "GitHub Issues", true), ("GitHub", true), ("Slack", true), ("Notion", true),
+                        ("Gmail", true), ("Helpdesk", false), ("HubSpot", false), ("PeopleOS", false)] %}
 
-  <div class="chiprow">
+<header class="hero">
+  <div class="hero-grid">
+    <div>
+      <span class="eyebrow">Unified · Agent Handler · Gateway · Workforce</span>
+      <h1>Connect agents, products and models to <span class="gd">real business data</span></h1>
+      <p class="sub">Connexa is a business connectivity platform in <b>one Python process</b>: a Common
+         Model data plane, a hosted link flow, an MCP tool server, and an LLM gateway.
+         Self-hostable. MIT licensed.</p>
+      <div>
+        <a class="btn dark" href="/dashboard">Start in the console</a>
+        <a class="btn ghost" href="/unified" style="margin-left:10px;">See how it works</a>
+      </div>
+      <div class="chiprow">
+        <span class="chip"><b>{{ connectors|length }}</b> connectors</span>
+        <span class="chip"><b>36+</b> agent tools over MCP</span>
+        <span class="chip"><b>4</b> planes, one process</span>
+        <span class="chip"><b>1</b> container to deploy</span>
+      </div>
+    </div>
+    <div>
+      <div class="panel">
+        <div class="term">
+          <div class="bar"><i></i><i></i><i></i><span>quickstart — localhost</span></div>
+          <div class="bd"><span class="c-dim">become a tenant, get live keys:</span>
+curl -X POST localhost:8000/api/v1/org/signup \\
+  -d '{"company_name":"Acme"}'
+
+<span class="c-dim">→</span> { "plan": "<span class="c-ok">free</span>",
+    "data_api_key": "<span class="c-key">cxk_…</span>",
+    "gateway_api_key": "<span class="c-key">cxg_…</span>" }<span class="caretnow"> </span></div>
+        </div>
+        <div class="term" style="margin-top:10px;">
+          <div class="bar"><i></i><i></i><i></i><span>sync a real provider — github-issues</span></div>
+          <div class="bd"><span class="c-dim"># real repository issues → common model</span>
+POST /api/ticketing/v1/accounts/&lt;token&gt;/sync
+
+<span class="c-dim">→</span> { "added": <span class="c-ok">14</span>, "unchanged": <span>0</span>, "counts":
+    { "Ticket": <span class="c-ok">14</span> } }<span class="caretnow"> </span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="marquee-wrap" aria-label="Protocol and connector strip">
+  <div class="marquee">
+    {% for rep in [0, 1] %}
+    {% for chip in marquee_static %}<span class="mq-chip"><b>{{ chip }}</b></span>{% endfor %}
     {% for c in connectors %}
-    <span class="chip"><b>{{ c.name }}</b>{% if c.real %} <span class="live">● live</span>{% endif %}</span>
+    <span class="mq-chip"><b>{{ c.name }}</b>{% if c.real %} <span class="live">● live</span>{% else %} <span class="demo">demo</span>{% endif %}</span>
+    {% endfor %}
     {% endfor %}
   </div>
 </div>
 
+<div class="diagram">
+  <svg viewBox="0 0 1100 330" role="img" aria-label="Diagram: agents, products and models connect through Connexa to providers">
+    <defs>
+      <linearGradient id="dgrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="#4353ff"/><stop offset="1" stop-color="#00b8d9"/>
+      </linearGradient>
+    </defs>
+    <!-- left: consumers -->
+    <g>
+      <rect class="d-node" x="30" y="52"  width="200" height="56" rx="14" stroke-width="1"/>
+      <text class="d-name" x="52" y="77">Your agents</text>
+      <text class="d-sub"  x="52" y="95">MCP · tool packs</text>
+      <rect class="d-node" x="30" y="140" width="200" height="56" rx="14"/>
+      <text class="d-name" x="52" y="165">Your product</text>
+      <text class="d-sub"  x="52" y="183">link flow · syncs</text>
+      <rect class="d-node" x="30" y="228" width="200" height="56" rx="14"/>
+      <text class="d-name" x="52" y="253">Your teams</text>
+      <text class="d-sub"  x="52" y="271">SCIM · governance</text>
+    </g>
+    <!-- center: connexa -->
+    <rect x="450" y="118" width="200" height="94" rx="20" fill="#10141c"/>
+    <text x="550" y="158" text-anchor="middle" fill="#fff" font-family="'Segoe UI',system-ui,sans-serif" font-size="21" font-weight="800">Connexa</text>
+    <text x="550" y="180" text-anchor="middle" fill="#8fa3c0" font-family="Consolas,monospace" font-size="11">one process · every plane</text>
+    <!-- right: providers -->
+    <g>
+      {% for item in diagram_right %}
+      {% set row = loop.index0 %}{% set col = row % 2 %}{% set band = row // 2 %}
+      <rect class="d-node" x="870" y="{{ 28 + band*78 }}" width="120" height="{{ 56 }}" rx="14"
+            transform="translate({{ col * 60 }},0)" style="opacity:{{ 1 - col * 0.35 }};"/>
+      <text class="d-name" x="886" y="{{ 53 + band*78 }}" transform="translate({{ col * 60 }},0)">{{ item[0] }}</text>
+      <text class="d-sub"  x="886" y="{{ 71 + band*78 }}" transform="translate({{ col * 60 }},0)">{{ 'live lane' if item[1] else 'demo lane' }}</text>
+      {% endfor %}
+    </g>
+    <!-- flows: consumers -> connexa -->
+    <path class="d-flow" d="M230 80  C330 80, 380 140, 450 150"/>
+    <path class="d-flow" d="M230 168 C330 168, 380 168, 450 168" style="animation-delay:.35s"/>
+    <path class="d-flow" d="M230 256 C330 256, 380 195, 450 185" style="animation-delay:.7s"/>
+    <!-- flows: connexa -> providers -->
+    <path class="d-flow" d="M650 145 C720 145, 780 65,  866 60"  style="animation-delay:.15s"/>
+    <path class="d-flow" d="M650 155 C720 155, 790 88,  926 66"  style="animation-delay:.45s"/>
+    <path class="d-flow" d="M650 165 C720 165, 780 150, 926 130" style="animation-delay:.75s"/>
+    <path class="d-flow" d="M650 175 C720 175, 790 235, 866 240" style="animation-delay:.3s"/>
+    <path class="d-flow" d="M650 185 C720 185, 780 260, 866 268" style="animation-delay:.6s"/>
+    <!-- riding pulses -->
+    <circle r="3" fill="#4353ff"><animateMotion dur="4s" repeatCount="indefinite" path="M230 168 C330 168, 380 168, 450 168"/></circle>
+    <circle r="3" fill="#00b8d9"><animateMotion dur="4.6s" begin="1.2s" repeatCount="indefinite" path="M650 165 C720 165, 780 150, 926 130"/></circle>
+    <circle r="3" fill="#4353ff"><animateMotion dur="5s" begin="2s" repeatCount="indefinite" path="M650 145 C720 145, 780 65, 866 60"/></circle>
+  </svg>
+</div>
+
+<section class="tight">
+  <span class="eyebrow">The platform</span>
+  <h2 class="sec">Four products, one process</h2>
+  <p class="sec-sub">Every pillar shares one database, one auth model, and one audit trail — the whole
+     platform ships as a single container you can run on a $5 VPS.</p>
+  <div class="metrics">
+    <div class="metric"><div class="n">{{ connectors|length }}</div><div class="l">connectors, with a written SDK to add yours</div></div>
+    <div class="metric"><div class="n">36+</div><div class="l">agent tools exposed over MCP</div></div>
+    <div class="metric"><div class="n">4 planes</div><div class="l">data · link · agent · gateway, one FastAPI process</div></div>
+    <div class="metric"><div class="n">1 file</div><div class="l">SQLite storage — swap to Postgres when you need it</div></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Families</span>
+  <h2 class="sec">What each plane does</h2>
+  <div class="step">
+    <div class="num">01 / UNIFIED</div>
+    <div>
+      <h3>One Common Model API for customer data</h3>
+      <p>Linked accounts, the hosted link flow, and a diff-aware sync engine that lands provider payloads
+         in normalized rows — with raw payloads riding along in <code>remote_data</code>.</p>
+      <a href="/unified" style="font-size:14px;text-decoration:none;font-weight:600;">Explore Unified →</a>
+    </div>
+    <pre class="code"><span class="label">data plane</span>GET /api/ticketing/v1/tickets
+X-Account-Token: &lt;account token&gt;
+pos  <em># → normalized rows + remote_data</em></pre>
+  </div>
+  <div class="step">
+    <div class="num">02 / AGENT HANDLER</div>
+    <div>
+      <h3>Agents with real accounts, safely</h3>
+      <p>Self-serve bootstrap, OAuth social-login, scoped MCP tool packs, machine-actionable reauth
+         contracts, DLP rules, and human approvals — every call audited.</p>
+      <a href="/agent-handler" style="font-size:14px;text-decoration:none;font-weight:600;">Explore Agent Handler →</a>
+    </div>
+    <pre class="code"><span class="label">agent plane</span>POST /api/v1/agent/signup/   <em># self-serve → cxa key + claim link</em>
+{"method":"tools/call","params":{"name":"gmail__send_email"}}</pre>
+  </div>
+  <div class="step">
+    <div class="num">03 / GATEWAY</div>
+    <div>
+      <h3>Every model through one OpenAI-compatible API</h3>
+      <p>Routing policies with ordered failover, streaming, credit metering per model — and hard budgets
+         that refuse calls once spent, per org and per team.</p>
+      <a href="/gateway" style="font-size:14px;text-decoration:none;font-weight:600;">Explore Gateway →</a>
+    </div>
+    <pre class="code"><span class="label">model plane</span>POST /v1/chat/completions
+{ "model":"gpt-4o-mini", "messages":[…] }
+<span class="label" style="margin-top:10px;">envelope</span>connexa: { "credits_charged":0.0021, "attempts":[…] }</pre>
+  </div>
+  <div class="step">
+    <div class="num">04 / WORKFORCE</div>
+    <div>
+      <h3>Govern the AI your people actually use</h3>
+      <p>Provision teams from your IdP over SCIM 2.0, allowlist models per team, cap their spend, and scan
+         every prompt and response with the same DLP rule engine.</p>
+      <a href="/workforce" style="font-size:14px;text-decoration:none;font-weight:600;">Explore Workforce →</a>
+    </div>
+    <pre class="code"><span class="label">governance</span>POST /scim/v2/Groups
+{ "displayName":"Support", "connexa_extensions":
+  { "allowed_models":["connexa-echo"], "monthly_credit_budget":500 } }</pre>
+  </div>
+</section>
+
 <section class="tight">
   <span class="eyebrow">One engine, two audiences</span>
-  <h2 class="sec">Powering products and teams</h2>
+  <h2 class="sec">For your product — and for your people</h2>
   <div class="split">
     <div class="tinted"><div class="inner">
       <div class="tag">For products</div>
@@ -35,45 +196,6 @@
          call passes DLP rules and human approval into an audit trail.</p>
       <a class="go" href="/agent-handler">Explore Agent Handler →</a>
     </div></div>
-  </div>
-</section>
-
-<section>
-  <span class="eyebrow">The platform</span>
-  <h2 class="sec">Four products, one process</h2>
-  <p class="sec-sub">Every pillar shares one database, one auth model, and one audit trail — deploy the whole
-     platform with a single container.</p>
-  <div class="metrics">
-    <div class="metric"><div class="n">{{ connectors|length }}</div><div class="l">connectors, with a written SDK to add yours</div></div>
-    <div class="metric"><div class="n">36+</div><div class="l">agent tools exposed over MCP</div></div>
-    <div class="metric"><div class="n">4 planes</div><div class="l">data · link · agent · gateway, one FastAPI process</div></div>
-    <div class="metric"><div class="n">1 file</div><div class="l">SQLite storage — swap to Postgres when you need it</div></div>
-  </div>
-</section>
-
-<section class="tight">
-  <div class="split">
-    <div class="card">
-      <div class="tag">Data</div>
-      <h3 style="margin-top:8px;">Connexa Unified</h3>
-      <p>Linked accounts, hosted link flow, sync engine, Common Models with remote_data, write-schema
-         discovery, passthrough, webhooks.</p>
-      <a class="go" href="/unified">Learn more →</a>
-    </div>
-    <div class="card">
-      <div class="tag">Agents</div>
-      <h3 style="margin-top:8px;">Agent Handler</h3>
-      <p>Self-serve signup, OAuth social-login, scoped tool packs, reauth contracts, DLP rules,
-         approval flow — all over MCP.</p>
-      <a class="go" href="/agent-handler">Learn more →</a>
-    </div>
-    <div class="card">
-      <div class="tag">Models</div>
-      <h3 style="margin-top:8px;">Gateway</h3>
-      <p>OpenAI-compatible chat + responses APIs, routing policies with ordered failover,
-         credit metering, hard budgets.</p>
-      <a class="go" href="/gateway">Learn more →</a>
-    </div>
   </div>
 </section>
 
@@ -111,13 +233,35 @@ X-Account-Token: &lt;account token&gt;</pre>
   </div>
 </section>
 
+<section>
+  <span class="eyebrow">Enforced, not promised</span>
+  <h2 class="sec">Security that ships in the box</h2>
+  <p class="sec-sub">These aren't badges — they're behaviors you can verify on your own machine,
+     in the source, against your own keys. <a href="/security">Full security page →</a></p>
+  <div class="honesty">
+    <div class="row">
+      <div class="h"><b><span class="tick">✓</span> Scoped keys</b><span>data / gateway / agent / admin — hashed, maskable, revocable</span></div>
+      <div class="h"><b><span class="tick">✓</span> Full audit trail</b><span>every meaningful action, append-only, console-browsable</span></div>
+      <div class="h"><b><span class="tick">✓</span> HMAC webhooks</b><span>sha256 over raw body — verify before you trust</span></div>
+      <div class="h"><b><span class="tick">✓</span> DLP both sides</b><span>REDACT / BLOCK on tool input and model output</span></div>
+      <div class="h"><b><span class="tick">✓</span> SCIM 2.0 / IdP</b><span>users + groups live at /scim/v2</span></div>
+      <div class="h"><b><span class="tick">✓</span> Self-host</b><span>the strongest residency: your own disk</span></div>
+    </div>
+    <p style="margin:18px 2px 0; font-size:13px; color:var(--muted);">Compliance program (SOC 2 and
+       friends) is on the public roadmap — stated as a roadmap, never as a badge.</p>
+  </div>
+</section>
+
 <section class="tight">
   <div class="cta-band">
     <h2>Stop gluing integrations together yourself</h2>
     <p>Clone it, run it, own it. The whole platform — data plane, link flow, agent handler, gateway —
        boots in one process and ships as one container.</p>
-    <a class="btn light" href="/dashboard">Open the console</a>
-    <a class="btn ghost" href="/docs" style="margin-left:10px; color:#d6dbe2;">Read the API docs</a>
+    <pre class="code"><span class="label">deploy</span>docker compose up --build     <em style="color:#8fa3c0"># https://github.com/Pixel017/Connexa</em></pre>
+    <div style="margin-top:18px;">
+      <a class="btn light" href="/dashboard">Open the console</a>
+      <a class="btn ghost" href="/docs" style="margin-left:10px;">Read the API docs</a>
+    </div>
   </div>
 </section>
 {% endblock %}

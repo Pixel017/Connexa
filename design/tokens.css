@@ -1,0 +1,53 @@
+/* Connexa design tokens — source of truth for the public site.
+ * Runtime CSS lives inline in connexa/site/templates/site_base.html (no build
+ * step, single request). Keep this file in sync after any :root change.
+ *
+ * To retune the look: edit the same names in site_base.html :root.
+ */
+
+:root {
+  /* ---- ink & surfaces (warm paper light theme) ---- */
+  --bg:          #f7f5ef;   /* page background (warm paper) */
+  --bg-deep:     #f1eee4;   /* alternate band background */
+  --card:        #fffdf8;   /* card surface */
+  --ink:         #10141c;   /* headings / strongest text */
+  --body:        #333c49;   /* body text */
+  --muted:       #66707e;   /* secondary text */
+  --line:        #e6e1d3;   /* hairlines & borders */
+  --line-soft:   #eee9dc;   /* faint row separators */
+
+  /* ---- brand ---- */
+  --accent:      #4353ff;   /* primary interactive */
+  --accent-ink:  #3041d8;   /* text-on-light accent (links, eyebrows) */
+  --accent-2:    #00b8d9;   /* gradient partner (indigo → teal) */
+  --grad:        linear-gradient(135deg, var(--accent), var(--accent-2));
+
+  /* ---- semantic ---- */
+  --ok:          #0c9d61;   /* live lanes, positive states */
+  --warn:        #c05e00;   /* demo/sample lanes */
+  --danger:      #d64045;
+
+  /* ---- code ---- */
+  --code-bg:     #101522;
+  --code-ink:    #9fd7ff;
+  --code-dim:    #5c6b84;
+  --code-label:  #f4b8a0;
+
+  /* ---- type ---- */
+  --font:        'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+  --mono:        Consolas, 'JetBrains Mono', Menlo, monospace;
+
+  /* ---- scale ---- */
+  --radius-lg:   22px;
+  --radius:      16px;
+  --radius-sm:   10px;
+  --shadow-1:    0 1px 2px rgba(16,20,28,.05), 0 8px 28px rgba(16,20,28,.06);
+  --shadow-2:    0 2px 8px rgba(16,20,28,.08), 0 24px 60px rgba(16,20,28,.14);
+  --maxw:        1120px;
+  --pad-x:       5vw;
+
+  /* ---- motion ---- */
+  --t-fast:      160ms cubic-bezier(.2,.7,.3,1);
+  --t-med:       320ms cubic-bezier(.2,.7,.3,1);
+  --t-reveal:    640ms cubic-bezier(.16,.84,.32,1);
+}
