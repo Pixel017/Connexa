@@ -92,8 +92,8 @@ Key endpoints:
 | `GET  /api/ticketing/v1/tickets/{id}` | single row with `remote_data` raw payload embedded |
 | `POST /api/ticketing/v1/tickets` | validated create |
 | `PATCH /api/ticketing/v1/tickets/{id}` | validated update |
-| `GET  /api/ticketing/v1/meta/write-schema` | discover fields + enums **before** writing |
-| `POST /api/ticketing/v1/passthrough` | escape hatch: raw method/path to the provider's own API |
+| `POST /api/{cat}/v1/meta/write-schema` | discover fields + enums **before** writing |
+| `POST /api/{cat}/v1/passthrough` | escape hatch: raw method/path to the provider's own API — **all six categories** (real lane forwards to the live GitHub API) |
 | `POST /api/{cat}/v1/account-token/{public_token}` | exchange public token for account token |
 | `POST /api/{cat}/v1/accounts/{public_token}/sync` | **on-demand sync**: pulls provider payloads into Common Model rows — idempotent, diff-aware (`added`/`updated`/`unchanged`), fires `LinkedAccount.synced` |
 | `POST /api/{cat}/v1/accounts/{public_token}/sync-frequency` | **scheduled background sync** per account (0 = manual) |
@@ -111,6 +111,11 @@ with the allowed choices in the body.
 - Dashboard (or API) issues a link token → end user opens `/link/{token}` in a browser
 - Picks an integration (options are filtered by the token's categories) → enters name → **Connect**
 - Normalized sample data is synced immediately, the page hands the **public token** back, and the platform fires a signed `LinkedAccount.linked` webhook
+- **Embeddable in your product**: self-contained script tag, no npm, no build step:
+
+```html
+<script src="https://your-host/link/embed.js" data-token="cxl_..." async></script>
+```
 
 ### 3. Agent Handler (`/api/v1/...`)
 
@@ -280,6 +285,21 @@ curl -X POST localhost:8000/api/link-tokens -H "Authorization: Bearer $DATA_KEY"
   "company_name": "Acme Corp", "accent_color": "#00a854",
   "logo_url": "https://acme.example/logo.png",
   "welcome_text": "Acme needs ERP access."}'
+```
+
+## Credential vault & SSO
+
+- **Vault** — set `CONNEXA_ENC_KEY` and every provider credential (linked accounts +
+  per-user connector tokens) is sealed with a Fernet envelope before it touches disk;
+  reads are transparent, plaintext rows stay readable, losing the key degrades to
+  `reauth_required` instead of leaking.
+- **SSO** — let your identity provider own console access: it signs an HS256 assertion
+  (JWT bearer pattern), Connexa verifies signature/expiry/issuer and mints the admin
+  session:
+
+```bash
+python -m connexa.sso   # self-sign an assertion the same way an IdP would
+curl -X POST localhost:8000/dashboard/sso/login -d "id_token=<header.body.sig>"
 ```
 
 ## DLP on both sides of the model

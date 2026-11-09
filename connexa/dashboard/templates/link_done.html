@@ -8,4 +8,11 @@ code{font-family:Consolas,monospace;background:#0f1720;color:#9ad1ff;padding:10p
 <p>Hand this <strong>public token</strong> back to the app that opened this screen<br>(it exchanges it server-side via the account-token endpoint):</p>
 <code>{% if pt %}{{ pt }}{% else %}PT-TOKEN-PLACEHOLDER{% endif %}</code>
 <p class="muted">You can close this window.</p>
-</div></body></html>
+</div>
+<script>
+/* embedded mode: tell the host page this connect is complete */
+try { if (window.parent && window.parent !== window) {
+  window.parent.postMessage({ source: "connexa-link", status: "complete", token: "{{ pt }}" }, "*");
+} } catch (e) {}
+</script>
+</body></html>

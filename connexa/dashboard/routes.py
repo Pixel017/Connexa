@@ -57,6 +57,30 @@ def login(request: Request, token: str = Form(...)):
                                       {"error": "Wrong admin token."}, status_code=401)
 
 
+@router.post("/dashboard/sso/login")
+def sso_login(request: Request, id_token: str = Form(...), db: Session = Depends(get_db)):
+    """IdP-initiated console SSO: verify the identity provider's signed assertion
+    (HS256 JWS), then mint the same admin session as a token login.
+
+    Enable with CONNEXA_SSO_SECRET; scope it with CONNEXA_SSO_ISSUER so only
+    your IdP's tokens are honored."""
+    if not settings.sso_secret:
+        raise HTTPException(501, {"detail": "SSO not configured — set CONNEXA_SSO_SECRET."})
+    from ..sso import verify as verify_sso
+    try:
+        payload = verify_sso(id_token, settings.sso_secret, settings.sso_issuer)
+    except ValueError as error:
+        audit(db, event_type="SSO_LOGIN_FAILED", description=str(error))
+        raise HTTPException(401, {"detail": f"Invalid SSO assertion: {error}"})
+    who = payload.get("email") or payload.get("sub") or "unknown-subject"
+    core = (db.query(Org).filter(Org.kind == "core").order_by(Org.created_at).first())
+    audit(db, event_type="SSO_LOGIN", description=f"{who} console login via signed assertion",
+          org_id=core.id if core else None)
+    response = RedirectResponse("/dashboard", status_code=303)
+    response.set_cookie("cx_admin", settings.admin_cookie_value, httponly=True, samesite="lax")
+    return response
+
+
 @router.get("/logout")
 def logout():
     response = RedirectResponse("/login", status_code=303)

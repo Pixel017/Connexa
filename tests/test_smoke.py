@@ -14,6 +14,7 @@ try:
 except PermissionError:
     pass
 os.environ["CONNEXA_DB"] = _TEST_DB
+os.environ["CONNEXA_ENC_KEY"] = "test-vault-key-smoke"   # run the whole suite with the vault ON
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -966,6 +967,130 @@ def test_github_issues_real_lane(client):
         assert empty["count"] == 0, "the account survives a failed pull and holds nothing fabricated"
     finally:
         registry._by_slug["github-issues"] = original_connector
+
+
+# ---------------------------------------------------------------- vault / SSO / embed / passthrough
+
+def test_credential_vault_seals_at_rest(client):
+    """With a vault key configured, provider credentials are sealed on disk
+    (Fernet envelope) while every ORM path reads them transparently."""
+    import sqlite3
+
+    from connexa.db import SessionLocal
+    from connexa.models import RegisteredUser
+
+    signup = client.post("/api/v1/agent/signup/").json()
+    headers = {"Authorization": f"Bearer {signup['api_key']}"}
+    user = signup["registered_user_id"]
+
+    paste = client.post(f"/api/v1/registered-users/{user}/credentials/", headers=headers,
+                        json={"connector": "notion", "token": "ntn_vault-secret-value"})
+    assert paste.status_code == 201
+
+    db = SessionLocal()
+    try:
+        row = db.query(RegisteredUser).filter(RegisteredUser.id == user).one()
+        assert row.credentials["notion"]["token"] == "ntn_vault-secret-value"   # transparent read
+    finally:
+        db.close()
+
+    with sqlite3.connect(_TEST_DB) as raw:
+        stored = raw.execute("SELECT credentials FROM registered_users WHERE id = ?",
+                             (user,)).fetchone()[0]
+    text = str(stored)
+    assert "enc.v1:" in text, "credentials must be sealed on disk"
+    assert "ntn_vault-secret-value" not in text, "plaintext secret must never reach disk"
+
+
+def test_sso_assertion_login(client, monkeypatch):
+    """The IdP's signed assertion logs into the console; bad/expired/forged
+    assertions are refused; unconfigured setups answer 501 honestly."""
+    import time
+
+    from connexa.config import settings as cfg
+    from connexa.sso import sign
+
+    monkeypatch.setattr(cfg, "sso_secret", "test-sso-secret")
+    monkeypatch.setattr(cfg, "sso_issuer", "https://idp.corp.example")
+
+    def attempt(payload, secret):
+        response = client.post("/dashboard/sso/login", follow_redirects=False,
+                               data={"id_token": sign(payload, secret)})
+        return response
+
+    ok = attempt({"iss": "https://idp.corp.example", "sub": "admin-001",
+                  "email": "admin@corp.example", "exp": time.time() + 300}, "test-sso-secret")
+    assert ok.status_code == 303 and "cx_admin" in ok.headers.get("set-cookie", "")
+
+    expired = attempt({"iss": "https://idp.corp.example", "email": "e@corp.example",
+                       "exp": time.time() - 1000}, "test-sso-secret")
+    assert expired.status_code == 401
+
+    forged = attempt({"iss": "https://idp.corp.example", "email": "e@corp.example",
+                      "exp": time.time() + 300}, "attacker-secret")
+    assert forged.status_code == 401
+
+    wrong_issuer = attempt({"iss": "https://evil.example", "email": "e@x.example",
+                            "exp": time.time() + 300}, "test-sso-secret")
+    assert wrong_issuer.status_code == 401
+
+    token = sign({"iss": "https://idp.corp.example", "email": "e@corp.example",
+                  "exp": time.time() + 300}, "test-sso-secret")
+    tampered = client.post("/dashboard/sso/login", follow_redirects=False,
+                           data={"id_token": token[:-6] + "AAAAAA"})
+    assert tampered.status_code == 401
+
+    monkeypatch.setattr(cfg, "sso_secret", "")
+    assert client.post("/dashboard/sso/login", follow_redirects=False,
+                       data={"id_token": token}).status_code == 501
+
+
+def test_embeddable_link_component(client):
+    response = client.get("/link/embed.js")
+    assert response.status_code == 200
+    assert "text/javascript" in response.headers["content-type"]
+    assert "iframe" in response.text and "data-token" in response.text
+
+
+def test_passthrough_on_wideplane_categories(client):
+    """Passthrough exists on every category; demo lanes return provider-shaped
+    views, honestly labeled demo=true."""
+    headers = {"Authorization": f"Bearer {_workforce_key(client)}"}
+    token = client.post("/api/link-tokens", json={"categories": ["ats"]},
+                        headers=headers).json()["link_token"]
+    pt = client.post(f"/link/{token}/connect",
+                     json={"integration": "hirepod", "end_user_name": "PX"}).json()["public_token"]
+
+    raw = client.post("/api/ats/v1/passthrough", headers={**headers, "X-Account-Token": pt},
+                      json={"method": "GET", "path": "/candidates"}).json()
+    assert raw["status"] == 200 and raw["demo"] is True
+    assert any("job_title" in row for row in raw["body"]["results"])
+
+
+def test_real_passthrough_forwards(monkeypatch):
+    """The real lane's passthrough forwards to the live provider API with the
+    account credential — verified here against a stubbed transport."""
+    from connexa.connectors.base import ToolContext
+    from connexa.connectors.real_github_issues import GitHubIssuesConnector
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"ok": True}
+
+    seen = {}
+
+    def fake_request(method, url, headers=None, json=None, timeout=None):
+        seen.update(method=method, url=url, json=json)
+        return FakeResponse()
+
+    monkeypatch.setattr("connexa.connectors.real_github_issues.httpx.request", fake_request)
+    connector = GitHubIssuesConnector(env_token="gh_token_x")
+    ctx = ToolContext(connector_slug="github-issues", credentials={}, env_token="gh_token_x")
+    raw = connector.passthrough(ctx, "GET", "/repos/o/r/issues")
+    assert raw["status"] == 200 and raw["body"] == {"ok": True}
+    assert seen["url"] == "https://api.github.com/repos/o/r/issues"
 
 
 

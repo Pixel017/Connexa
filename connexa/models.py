@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
 from .utils import now, uid
+from .vault import CredsJSON
 
 
 # ---------------------------------------------------------------- core tenants
@@ -80,7 +81,7 @@ class LinkedAccount(Base):
     end_user_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     account_token: Mapped[str] = mapped_column(String(80), unique=True)
     status: Mapped[str] = mapped_column(String(20), default="live")
-    credentials: Mapped[dict] = mapped_column(JSON, default=dict)
+    credentials: Mapped[dict] = mapped_column(CredsJSON, default=dict)
     linked_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     sync_frequency_seconds: Mapped[int] = mapped_column(Integer, default=0)  # 0 = manual only
@@ -271,7 +272,7 @@ class RegisteredUser(Base):
     origin_user_id: Mapped[str] = mapped_column(String(120))
     origin_user_name: Mapped[str] = mapped_column(String(160))
     origin_company_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
-    credentials: Mapped[dict] = mapped_column(JSON, default=dict)  # connector_slug -> credential dict
+    credentials: Mapped[dict] = mapped_column(CredsJSON, default=dict)  # connector_slug -> credential dict
     is_test: Mapped[bool] = mapped_column(Boolean, default=False)
     idp_external_id: Mapped[str | None] = mapped_column(String(160), nullable=True)  # SCIM externalId
     active: Mapped[bool] = mapped_column(Boolean, default=True)   # SCIM deprovisioning flips this

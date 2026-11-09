@@ -14,15 +14,47 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from .common_models import CANDIDATE_STATUSES, COMMON_MODELS
+from .connectors.registry import registry
 from .db import get_db
 from .events import emit
 from .metering import audit, usage
 from .models import Candidate, FileRow, Folder, Org
 from .security import data_plane_key
 from .utils import iso, now, uid
-from .unified import _account, _apply_field_scopes, _minimize, _next_cursor, _next_remote
+from .unified import (_account, _apply_field_scopes, _connector_ctx, _minimize,
+                      _next_cursor, _next_remote)
 
 router = APIRouter(prefix="/api")
+
+# ------------------------------------------------------------ passthrough (every category)
+#
+# Same contract on all six categories now: one POST, raw provider call, raw
+# provider response. On the real lane (github-issues) this is a live forward;
+# demo providers return their provider-shaped view marked demo=true.
+
+
+def _register_passthrough(category: str) -> None:
+    def endpoint(data: dict, auth=Depends(data_plane_key), db: Session = Depends(get_db),
+                 account_token: str | None = Header(default=None, alias="X-Account-Token")):
+        key, org = auth
+        account = _account(account_token, db, org)
+        connector = registry.require(account.integration)
+        ctx = _connector_ctx(account)
+        ctx.request_payload = data.get("payload")     # optional JSON body for provider POSTs
+        method = str(data.get("method", "GET")).upper()
+        path = str(data.get("path", "/"))
+        raw = connector.passthrough(ctx, method, path)
+        usage(db, plane="data", kind="passthrough", org_id=org.id, key_id=key.id,
+              units=1.0, credit_type="medium")
+        return raw
+    endpoint.__name__ = f"{category}_passthrough"
+    router.add_api_route(f"/{category}/v1/passthrough", endpoint, methods=["POST"],
+                         name=f"{category}_passthrough",
+                         description=f"Raw provider call escape hatch for the {category} category.")
+
+
+for _category in ("crm", "hris", "accounting", "ats", "filestorage"):
+    _register_passthrough(_category)
 
 
 # ------------------------------------------------------------ ATS / Candidate

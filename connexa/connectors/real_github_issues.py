@@ -33,11 +33,36 @@ class GitHubIssuesConnector(Connector):
         return []      # real only — this connector never fabricates data
 
     # --- the real pull -----------------------------------------------------------
+    def _token_for(self, credentials: dict) -> str:
+        return (credentials.get("token") or credentials.get("access_token")
+                or credentials.get("oauth_access_token") or str(self.env_token or ""))
+
+    def passthrough(self, ctx, method: str, path: str) -> dict:
+        """REAL passthrough: forward method+path to the live GitHub REST API with
+        the account's credential (per-account PAT or platform token)."""
+        token = self._token_for(ctx.credentials or {})
+        if not token:
+            return {"status": 401, "body": {"error": "A GitHub token is required for passthrough "
+                                                    "(paste one or set CONNEXA_GITHUB_TOKEN)."}}
+        url = f"https://api.github.com{path if path.startswith('/') else '/' + path}"
+        try:
+            response = httpx.request(method, url, headers={"Authorization": f"Bearer {token}",
+                                                           "Accept": "application/vnd.github+json"},
+                                     json=(getattr(ctx, "request_payload", None)
+                                           if method not in ("GET", "DELETE") else None),
+                                     timeout=15.0)
+        except httpx.HTTPError as error:
+            return {"status": 502, "body": {"error": f"github unreachable: {error}"}}
+        try:
+            body = response.json()
+        except ValueError:
+            body = response.text
+        return {"status": response.status_code, "body": body}
+
     def pull_remote(self, category: str, credentials: dict) -> list[dict]:
         if category != "ticketing":
             raise RealPullError(f"github-issues does not serve category '{category}'.")
-        token = (credentials.get("token") or credentials.get("access_token")
-                 or credentials.get("oauth_access_token") or self.env_token)
+        token = self._token_for(credentials)
         repo = credentials.get("repo") or ""
         if not token:
             raise RealPullError("A GitHub token is required (paste one in the link flow or set "

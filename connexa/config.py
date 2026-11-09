@@ -36,6 +36,13 @@ class Settings:
 
     db_path: str = _env("CONNEXA_DB", os.path.join(os.path.dirname(os.path.dirname(__file__)), "connexa.db"))
 
+    # Credential vault: set to encrypt provider credentials at rest (Fernet envelope)
+    enc_key: str = _env("CONNEXA_ENC_KEY", "").strip()
+
+    # Console SSO: IdP signs an HS256 assertion with this secret; issuer scopes it
+    sso_secret: str = _env("CONNEXA_SSO_SECRET", "").strip()
+    sso_issuer: str = _env("CONNEXA_SSO_ISSUER", "").strip()
+
     # Demo defaults
     seed_org_name: str = "Acme Inc"
     seed_org_slug: str = "acme-inc"

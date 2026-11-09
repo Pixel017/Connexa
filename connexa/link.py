@@ -28,6 +28,70 @@ TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "dashboard", "templates")
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
 
 
+# ---------------------------------------------------------------- embeddable link component
+#
+# The hosted link page ships as an embeddable widget: point a <script> at it
+# from your product and your end user connects inline (iframe overlay), same
+# flow, same trust boundary:
+#     <script src="https://your-host/link/embed.js" data-token="cxl_..." async></script>
+
+_EMBED_JS = """(function () {
+  'use strict';
+  var script = (document.currentScript ||
+    document.querySelector('script[src*="link/embed.js"]'));
+  if (!script) return;
+  var token = script.getAttribute('data-token');
+  if (!token) { console.error('connexa-link: data-token attribute is required'); return; }
+  var base = (script.getAttribute('data-base') || script.src.split('/link/embed.js')[0]);
+
+  var overlay = document.createElement('div');
+  overlay.setAttribute('data-connexa-link', token);
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(15,18,28,.55);'
+    + 'display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s';
+
+  var frame = document.createElement('iframe');
+  var linkUrl = base + '/link/' + encodeURIComponent(token);
+  frame.src = linkUrl;
+  frame.title = 'Connect your account (Connexa Link)';
+  frame.style.cssText = 'width:min(560px,94vw);height:min(700px,92vh);border:0;border-radius:16px;'
+    + 'box-shadow:0 30px 80px rgba(0,0,0,.35);background:#fff';
+  frame.setAttribute('allow', 'clipboard-write');
+
+  var close = document.createElement('button');
+  close.textContent = '\\u00d7';
+  close.setAttribute('aria-label', 'Close');
+  close.style.cssText = 'position:absolute;top:18px;right:22px;width:38px;height:38px;'
+    + 'border-radius:50%;border:0;background:#fff;color:#10141c;font-size:20px;cursor:pointer;'
+    + 'box-shadow:0 4px 14px rgba(0,0,0,.25)';
+
+  function shut() {
+    overlay.style.opacity = '0';
+    window.setTimeout(function () { overlay.remove(); }, 220);
+  }
+  close.addEventListener('click', shut);
+  overlay.addEventListener('click', function (event) { if (event.target === overlay) shut(); });
+
+  overlay.appendChild(frame);
+  overlay.appendChild(close);
+  document.body.appendChild(overlay);
+  window.requestAnimationFrame(function () { overlay.style.opacity = '1'; });
+
+  window.addEventListener('message', function (event) {
+    var data = event.data || {};
+    if (data.source === 'connexa-link' && data.status === 'complete') { shut(); }
+  });
+})();
+"""
+
+
+@router.get("/embed.js", include_in_schema=False)
+def link_embed_js():
+    """The self-contained embeddable link component (no build step, no npm)."""
+    from fastapi import Response
+    return Response(_EMBED_JS, media_type="text/javascript",
+                    headers={"Cache-Control": "no-cache"})
+
+
 # ---------------------------------------------------------------- dashboard API
 
 class LinkTokenRequest(BaseModel):

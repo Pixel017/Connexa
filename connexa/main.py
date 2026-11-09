@@ -92,12 +92,14 @@ security rules: GET /api/v1/security/rules/ ; mutate via POST /api/v1/security/r
 
 ## Data plane for customers
 POST /api/link-tokens -> open returned /link/{token} in a browser -> connect (initial sync runs automatically)
+Embeddable link component (no build step): <script src="https://host/link/embed.js" data-token="cxl_..." async></script>
 POST /api/{category}/v1/account-token/{public_token}
 POST /api/{category}/v1/accounts/{public_token}/sync -> on-demand idempotent sync (added/updated/unchanged + counts)
 GET/POST/PATCH /api/ticketing/v1/tickets ; /api/crm/v1/contacts ; /api/crm/v1/deals
 GET/POST/PATCH /api/hris/v1/employees ; /api/accounting/v1/invoices ; /api/ats/v1/candidates
 GET/POST/PATCH /api/filestorage/v1/files ; GET /api/filestorage/v1/folders
-GET /api/{category}/v1/meta/write-schema before writes; POST /api/ticketing/v1/passthrough for raw provider calls
+GET /api/{category}/v1/meta/write-schema before writes; POST /api/{category}/v1/passthrough for raw provider calls
+  (all six categories; the real github-issues lane forwards to the live GitHub API; demo lanes return provider-shaped views labeled demo=true)
 POST /api/{category}/v1/accounts/{public_token}/sync-frequency -> {"seconds": N} scheduled background sync (0 = manual)
 GET  /api/{category}/v1/issues -> open sync issues (health surface)
 DELETE /api/{category}/v1/accounts/{public_token} -> erasure: remove account + all derived rows
@@ -115,6 +117,8 @@ POST /api/v1/org/login {"email", "password"} -> account view (masked keys)
 GET  /api/v1/org/me (data key) -> plan, linked-account usage vs limit, credits
 GET  /api/v1/org/billing (data key) -> plan limits + upgrade_url (CONNEXA_STRIPE_PAYMENT_LINK when set)
 Free plan enforces 3 linked accounts at connect time (402 plan_limit_reached)
+Credential vault: set CONNEXA_ENC_KEY -> provider credentials sealed at rest (Fernet envelope), transparent reads
+Console SSO: POST /dashboard/sso/login with an IdP-signed HS256 assertion (CONNEXA_SSO_SECRET / _ISSUER)
 
 ## Workforce plane (teams / SCIM / skills / memory)
 POST /api/workforce/v1/teams {"name", "allowed_models", "monthly_credit_budget", "tool_pack_id"}

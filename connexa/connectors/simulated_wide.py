@@ -37,6 +37,18 @@ class HirePodConnector(Connector):
     def build_tools(self):
         return []
 
+    def _provider_view(self) -> list[dict]:
+        """The provider-shaped payload this synthetic provider would return.
+        Passthrough is honest about the lane: demo=true, never disguised as live."""
+        return [{k: v for k, v in row.items() if k != "type"}
+                for row in self.generate_sample("ats")]
+
+    def passthrough(self, ctx, method: str, path: str) -> dict:
+        if method.upper() != "GET":
+            return {"status": 405, "demo": True,
+                    "body": {"error": "demo lane serves GET provider views only"}}
+        return {"status": 200, "demo": True, "body": {"path": path, "results": self._provider_view()}}
+
     def generate_sample(self, category: str) -> list[dict]:
         if category != "ats":
             return []
@@ -79,6 +91,16 @@ class VaultfileConnector(Connector):
 
     def build_tools(self):
         return []
+
+    def _provider_view(self) -> list[dict]:
+        return [{k: v for k, v in row.items() if k != "type"}
+                for row in self.generate_sample("filestorage")]
+
+    def passthrough(self, ctx, method: str, path: str) -> dict:
+        if method.upper() != "GET":
+            return {"status": 405, "demo": True,
+                    "body": {"error": "demo lane serves GET provider views only"}}
+        return {"status": 200, "demo": True, "body": {"path": path, "results": self._provider_view()}}
 
     def generate_sample(self, category: str) -> list[dict]:
         if category != "filestorage":
